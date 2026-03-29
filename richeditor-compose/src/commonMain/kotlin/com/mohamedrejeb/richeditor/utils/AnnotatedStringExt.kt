@@ -123,8 +123,17 @@ internal fun AnnotatedString.Builder.append(
 ): Int {
     var index = startIndex
 
+    // Guard: if the span tree is out-of-sync with the flat text (e.g. after a failed removeTextRange),
+    // avoid a StringIndexOutOfBoundsException by clamping to available text.
+    if (index >= text.length) {
+        richSpan.text = ""
+        richSpan.textRange = TextRange(index)
+        return startIndex
+    }
+
     withStyle(richSpan.spanStyle.merge(richSpan.richSpanStyle.spanStyle(state.config))) {
-        val newText = text.substring(index, index + richSpan.text.length)
+        val safeEnd = (index + richSpan.text.length).coerceAtMost(text.length)
+        val newText = text.substring(index, safeEnd)
 
         richSpan.text = newText
         richSpan.textRange = TextRange(index, index + richSpan.text.length)

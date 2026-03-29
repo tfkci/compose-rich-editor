@@ -166,6 +166,43 @@ class RichSpanTest {
         )
     }
 
+    // Regression tests for half-open interval overlap in removeTextRange
+    // (fix for StringIndexOutOfBoundsException on CUT)
+
+    @Test
+    fun testRemoveTextRangeAdjacentAfterSpan() {
+        // Remove range starts exactly at the span's exclusive end — no overlap, span should be unchanged.
+        // span covers (0,3)="012", remove (3,5): adjacent but NOT overlapping in half-open semantics
+        val result = richSpan.removeTextRange(TextRange(3, 5), 0)
+        assertEquals("012", result.second?.text)
+    }
+
+    @Test
+    fun testRemoveTextRangeAdjacentBeforeSpan() {
+        // Remove range ends exactly at the span's start — no overlap.
+        // span covers (3,5)="34" (first child), remove (0,3): adjacent but NOT overlapping
+        val firstChild = richSpan.children.first()
+        val result = firstChild.removeTextRange(TextRange(0, 3), 3)
+        assertEquals("34", result.second?.text)
+    }
+
+    @Test
+    fun testRemoveTextRangePartialOverlapAtSpanEnd() {
+        // Remove range overlaps the tail of the span.
+        // span covers (0,3)="012", remove (2,5): should leave "01"
+        val result = richSpan.removeTextRange(TextRange(2, 5), 0)
+        assertEquals("01", result.second?.text)
+    }
+
+    @Test
+    fun testRemoveTextRangePartialOverlapAtSpanStart() {
+        // Remove range overlaps the head of the span.
+        // The last child covers (5,8)="567", remove (3,6): should leave "67"
+        val lastChild = richSpan.children.last()
+        val result = lastChild.removeTextRange(TextRange(3, 6), 5)
+        assertEquals("67", result.second?.text)
+    }
+
     @Test
     fun testBefore() {
         val before1 = richSpan.children.first().before

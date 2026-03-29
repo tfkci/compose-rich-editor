@@ -478,13 +478,15 @@ internal class RichSpan(
             this.textRange = TextRange(start = 0, end = 0)
             text = ""
         }
-        // Remove text from start and end
-        else if (removeTextRange.min in this.textRange || (removeTextRange.max - 1) in this.textRange) {
-            val startFirstHalf = 0 until (removeTextRange.min - this.textRange.min)
-            val startSecondHalf = (removeTextRange.max - this.textRange.min) until (this.textRange.max - this.textRange.min)
-            val newStartText =
-                (if (startFirstHalf.isEmpty()) "" else text.substring(startFirstHalf)) +
-                (if (startSecondHalf.isEmpty()) "" else text.substring(startSecondHalf))
+        // Remove text from start and/or end: use half-open interval overlap
+        // [removeTextRange.min, removeTextRange.max) overlaps [textRange.min, textRange.max)
+        // iff removeTextRange.min < textRange.max && removeTextRange.max > textRange.min
+        else if (removeTextRange.min < this.textRange.max && removeTextRange.max > this.textRange.min) {
+            val clampedRemoveMin = removeTextRange.min.coerceAtLeast(this.textRange.min)
+            val clampedRemoveMax = removeTextRange.max.coerceAtMost(this.textRange.max)
+            val localRemoveMin = (clampedRemoveMin - this.textRange.min).coerceAtLeast(0)
+            val localRemoveMax = (clampedRemoveMax - this.textRange.min).coerceAtMost(text.length)
+            val newStartText = text.substring(0, localRemoveMin) + text.substring(localRemoveMax)
 
             this.textRange = TextRange(start = this.textRange.min, end = this.textRange.min + newStartText.length)
             text = newStartText

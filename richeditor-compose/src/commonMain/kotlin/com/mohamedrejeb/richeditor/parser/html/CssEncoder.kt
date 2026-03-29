@@ -160,8 +160,8 @@ internal object CssEncoder {
      * @return the parsed [Color] or `null` if the color string could not be parsed.
      */
     internal fun parseCssColor(cssColor: String): Color? {
-        val rgbRegex = Regex("""rgb\((\d+), (\d+), (\d+)\)""")
-        val rgbaRegex = Regex("""rgba\((\d+), (\d+), (\d+), ([\d.]+)\)""")
+        val rgbRegex = Regex("""rgb\(([0-9]+), ([0-9]+), ([0-9]+)\)""")
+        val rgbaRegex = Regex("""rgba\(([0-9]+), ([0-9]+), ([0-9]+), ([0-9.]+)\)""")
         val hexRegex = Regex("""#?([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})""")
 
         // Check for rgb() format
@@ -216,7 +216,7 @@ internal object CssEncoder {
      */
     internal fun parseCssSize(cssSize: String): Float? {
         if (cssSize == "0") return 0f
-        val sizeRegex = Regex("""([-]?\d+(\.\d+)?)\s*(px|pt|em|rem|%)""")
+        val sizeRegex = Regex("""([-]?[0-9]+(\.[0-9]+)?)\s*(px|pt|em|rem|%)""")
         val sizeMatchResult = sizeRegex.find(cssSize)
 
         if (sizeMatchResult != null && sizeMatchResult.groupValues.size == 4) {
@@ -236,7 +236,7 @@ internal object CssEncoder {
 
     internal fun parseCssTextSize(cssTextSize: String): TextUnit {
         if (cssTextSize == "0") return TextUnit.Unspecified
-        val sizeRegex = Regex("""([-]?\d+(\.\d+)?)\s*(px|pt|em|rem|%)""")
+        val sizeRegex = Regex("""([-]?[0-9]+(\.[0-9]+)?)\s*(px|pt|em|rem|%)""")
         val sizeMatchResult = sizeRegex.find(cssTextSize)
 
         if (sizeMatchResult != null && sizeMatchResult.groupValues.size == 4) {

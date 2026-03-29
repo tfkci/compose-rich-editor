@@ -2374,9 +2374,10 @@ public class RichTextState internal constructor(
                 continue
             }
 
-            // Make sure the index is not less than the minimum text range of the rich span style
-            // This is to make sure that the index is not in paragraph custom start text
+            // This is to make sure that the index is not in paragraph custom start text.
+            // Also clamp to the actual text length in case the span tree has stale textRange values.
             val sliceIndex = max(index, richSpan.textRange.min)
+                .coerceAtMost(tempTextFieldValue.text.lastIndex)
 
             // Create a new paragraph style
             val newParagraph = richSpan.paragraph.slice(
