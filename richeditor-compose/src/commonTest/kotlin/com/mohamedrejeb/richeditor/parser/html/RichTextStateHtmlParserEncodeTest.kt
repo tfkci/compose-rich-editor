@@ -2,6 +2,7 @@ package com.mohamedrejeb.richeditor.parser.html
 
 import com.mohamedrejeb.richeditor.annotation.ExperimentalRichTextApi
 import com.mohamedrejeb.richeditor.model.RichSpanStyle
+import com.mohamedrejeb.richeditor.model.RichTextState
 import com.mohamedrejeb.richeditor.paragraph.type.OrderedList
 import com.mohamedrejeb.richeditor.paragraph.type.UnorderedList
 import com.mohamedrejeb.richeditor.parser.utils.H1SpanStyle
@@ -177,6 +178,117 @@ class RichTextStateHtmlParserEncodeTest {
 
         assertEquals(H1SpanStyle, firstPart.spanStyle)
         assertEquals(H1SpanStyle, secondPart.spanStyle)
+    }
+
+    // Regression: setHtml → toHtml roundtrip must preserve <br> counts between block elements
+    @Test
+    fun testSetHtmlToHtmlRoundtripPreservesBrTags() {
+        val html = "<p>Eren</p><br><br><p>Tufekci</p><br><p>Yasemin</p><br><br><br><br><p>Tufekci</p>"
+        val state = RichTextState()
+        state.setHtml(html)
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testSetHtmlToHtmlSingleBrBetweenParagraphs() {
+        val html = "<p>A</p><br><p>B</p>"
+        val state = RichTextState()
+        state.setHtml(html)
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testSetHtmlToHtmlDoubleBrBetweenParagraphs() {
+        val html = "<p>A</p><br><br><p>B</p>"
+        val state = RichTextState()
+        state.setHtml(html)
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testSetHtmlToHtmlDoubleRoundtrip() {
+        // The user reports each roundtrip loses one <br> per group.
+        // Test that calling setHtml(toHtml()) a second time is still idempotent.
+        val html = "<p>Eren</p><br><br><p>Tufekci</p><br><p>Yasemin</p><br><br><br><br><p>Tufekci</p>"
+        val state = RichTextState()
+        state.setHtml(html)
+        val firstRoundtrip = state.toHtml()
+        assertEquals(html, firstRoundtrip, "First roundtrip should preserve all <br> tags")
+
+        // Second roundtrip: feed the output back
+        state.setHtml(firstRoundtrip)
+        val secondRoundtrip = state.toHtml()
+        assertEquals(html, secondRoundtrip, "Second roundtrip should still preserve all <br> tags")
+
+        // Third roundtrip for good measure
+        state.setHtml(secondRoundtrip)
+        val thirdRoundtrip = state.toHtml()
+        assertEquals(html, thirdRoundtrip, "Third roundtrip should still preserve all <br> tags")
+    }
+
+    @Test
+    fun testSetHtmlParagraphCountPreserved() {
+        // Verify the internal paragraph model is correct after setHtml
+        val html = "<p>A</p><br><br><p>B</p>"
+        val state = RichTextState()
+        state.setHtml(html)
+        // Expected: P("A"), P(empty/br), P(empty/br), P("B") = 4 paragraphs
+        // The </p> creates a separator paragraph, first <br> creates another,
+        // second <br> creates one that gets reused by <p>B</p>
+        // So we should have: P("A"), P(empty), P(empty), P("B")
+        val paragraphs = state.richParagraphList
+        val contentParagraphs = paragraphs.filter { !it.isEmpty() }
+        val emptyParagraphs = paragraphs.filter { it.isEmpty() }
+        assertEquals(2, contentParagraphs.size, "Should have 2 content paragraphs")
+        assertEquals(2, emptyParagraphs.size, "Should have 2 empty paragraphs (for 2 <br> tags)")
+        assertEquals("A", contentParagraphs[0].children.firstOrNull()?.text)
+        assertEquals("B", contentParagraphs[1].children.firstOrNull()?.text)
+    }
+
+    @Test
+    fun testSetHtmlOnPreExistingState() {
+        // In the app, setHtml might be called on a state that already has content
+        val state = RichTextState()
+        state.setHtml("<p>Initial content</p><br><p>More content</p>")
+        // Now overwrite with the problematic HTML
+        val html = "<p>Eren</p><br><br><p>Tufekci</p><br><p>Yasemin</p><br><br><br><br><p>Tufekci</p>"
+        state.setHtml(html)
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testSetHtmlThenSimulateRecomposition() {
+        // Simulate what happens when Compose triggers updateAnnotatedString after setHtml
+        val state = RichTextState()
+        val html = "<p>A</p><br><br><p>B</p>"
+        state.setHtml(html)
+
+        // Manually call updateAnnotatedString (which Compose would trigger via recomposition)
+        // This is the text-parameter path with the Bug Fixes guards
+        state.updateAnnotatedString(state.textFieldValue)
+
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testSetHtmlThenOnTextFieldValueChange() {
+        // Simulate BasicTextField calling onValueChange with the same text (sync)
+        val state = RichTextState()
+        val html = "<p>A</p><br><br><p>B</p>"
+        state.setHtml(html)
+
+        // Simulate what BasicTextField might do: call onTextFieldValueChange with same value
+        state.onTextFieldValueChange(state.textFieldValue)
+
+        assertEquals(html, state.toHtml())
+    }
+
+    @Test
+    fun testEncodeDirectRoundtripPreservesBr() {
+        // Test encode directly (not through setHtml) to isolate if the issue is in encode vs updateRichParagraphList
+        val html = "<p>A</p><br><br><p>B</p>"
+        val state = RichTextStateHtmlParser.encode(html)
+        assertEquals(html, state.toHtml())
     }
 
     @Test

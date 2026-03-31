@@ -8,6 +8,21 @@ plugins {
 }
 
 publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/tfkci/compose-rich-editor")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                    ?: providers.gradleProperty("gpr.user").orNull
+                    ?: ""
+                password = System.getenv("GITHUB_TOKEN")
+                    ?: providers.gradleProperty("gpr.key").orNull
+                    ?: ""
+            }
+        }
+    }
+
     // Configure all publications
     publications.withType<MavenPublication> {
         // Stub javadoc.jar artifact
