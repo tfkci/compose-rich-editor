@@ -4,7 +4,7 @@ plugins {
 
 allprojects {
     group = "com.mohamedrejeb.richeditor"
-    version = System.getenv("VERSION") ?: "ertech-1.0.0-rc17"
+    version = System.getenv("VERSION") ?: "ertech-1.0.0-rc18"
 }
 
 nexusPublishing {
