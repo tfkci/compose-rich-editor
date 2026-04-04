@@ -14,6 +14,42 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
+ * In-memory cache of the last HTML copied from a RichTextState editor.
+ * Used as a fallback when the platform clipboard doesn't preserve htmlText
+ * (e.g., Compose's newer LocalClipboard API bypasses ClipData.newHtmlText).
+ *
+ * Multiple plain-text representations are stored because the clipboard text
+ * may use different separators (spaces from the internal representation,
+ * or newlines from the AnnotatedString).
+ */
+internal object RichTextClipboardCache {
+    var cachedHtml: String? = null
+    private var cachedPlainTexts: List<String> = emptyList()
+
+    fun store(html: String, vararg plainTextVariants: String) {
+        cachedHtml = html
+        cachedPlainTexts = plainTextVariants.toList()
+        pasteLog(PASTE_TAG, "ClipboardCache.store: html=${html.take(120)}, variants=${plainTextVariants.map { it.take(40) }}")
+    }
+
+    /**
+     * Returns cached HTML if the given [clipboardPlainText] matches any stored variant.
+     */
+    fun match(clipboardPlainText: String): String? {
+        val html = cachedHtml ?: return null
+        val trimmedInput = clipboardPlainText.trimEnd()
+        for (variant in cachedPlainTexts) {
+            if (variant.trimEnd() == trimmedInput) {
+                pasteLog(PASTE_TAG, "ClipboardCache.match: HIT — returning cached HTML (${html.length} chars)")
+                return html
+            }
+        }
+        pasteLog(PASTE_TAG, "ClipboardCache.match: MISS — clip=\"${clipboardPlainText.take(40)}\"")
+        return null
+    }
+}
+
+/**
  * A [ClipboardManager] that can handle [RichTextState].
  * It will convert the [RichTextState] to [AnnotatedString] and delegate the [ClipboardManager] to handle the rest.
  *
@@ -99,27 +135,28 @@ internal class RichTextClipboardManager(
 
         val plainText = richTextAnnotatedString.text
 
-        // Try to write HTML + plain text to the platform clipboard.
-        // This bypasses the lossy AnnotatedString→Spanned→Html.toHtml() round-trip
-        // that loses paragraph structure.
+        // Always cache the HTML in-memory so it's available on paste even if
+        // the platform clipboard doesn't preserve htmlText.
         if (!selection.collapsed && plainText.isNotEmpty()) {
-            // Use a deep copy of the full state to generate clean HTML.
-            // For full-selection copies (the common case) this is exact.
-            // For partial selections the HTML may include extra content, but
-            // paragraph structure is always preserved — the paste handler will
-            // insert only the styled content, and the cursor position ensures
-            // the correct amount of text is placed.
             val html = try {
                 richTextState.toHtml()
             } catch (_: Exception) {
                 null
             }
-            pasteLog(PASTE_TAG, "setText: selection=$selection, plainText=\"${plainText.take(80)}\", html=${html?.take(120)}")
-            if (html != null && spannedPasteHandler.writeHtml(html, plainText)) {
-                pasteLog(PASTE_TAG, "setText: writeHtml succeeded — returning")
-                return
+            if (html != null) {
+                // Cache in-memory for self-paste.
+                // Store the internal text (spaces between paragraphs) and
+                // the AnnotatedString text (may have newlines) as match variants.
+                val internalText = richTextState.textFieldValue.text
+                RichTextClipboardCache.store(html, plainText, internalText)
+
+                // Also try to write HTML directly to platform clipboard
+                pasteLog(PASTE_TAG, "setText: writing HTML to clipboard (${html.length} chars)")
+                if (spannedPasteHandler.writeHtml(html, plainText)) {
+                    pasteLog(PASTE_TAG, "setText: writeHtml succeeded — returning")
+                    return
+                }
             }
-            pasteLog(PASTE_TAG, "setText: writeHtml failed — falling through to plain clipboard")
         }
 
         // Fallback: write AnnotatedString via Compose clipboard

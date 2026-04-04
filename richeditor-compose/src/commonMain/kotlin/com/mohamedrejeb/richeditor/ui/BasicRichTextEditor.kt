@@ -455,6 +455,11 @@ private class SpannedPasteTextToolbar(
                 }
             }
             if (html.isNotEmpty()) {
+                // Always cache in-memory so paste can find it even if
+                // platform clipboard doesn't preserve htmlText.
+                // Store both newline-separated and the internal space-separated text.
+                val internalText = richTextState.textFieldValue.text
+                RichTextClipboardCache.store(html, plainText, internalText)
                 pasteLog(PASTE_TAG, "wrapCopy: writing HTML to clipboard (${html.length} chars)")
                 pasteHandler.writeHtml(html, plainText)
             }

@@ -60,10 +60,21 @@ private class IosSpannedPasteHandler(
         val html = readHtmlFromPasteboard()
         if (html != null) {
             pasteLog(PASTE_TAG, "iOS readHtml: found HTML (${html.length} chars)")
-        } else {
-            pasteLog(PASTE_TAG, "iOS readHtml: no HTML on clipboard")
+            return html
         }
-        return html
+
+        // Check in-memory cache
+        val clipPlain = UIPasteboard.generalPasteboard.string
+        if (clipPlain != null) {
+            val cachedHtml = RichTextClipboardCache.match(clipPlain)
+            if (cachedHtml != null) {
+                pasteLog(PASTE_TAG, "iOS readHtml: using in-memory cached HTML (${cachedHtml.length} chars)")
+                return cachedHtml
+            }
+        }
+
+        pasteLog(PASTE_TAG, "iOS readHtml: no HTML on clipboard")
+        return null
     }
 
     override fun tryPasteSpanned(): Boolean {

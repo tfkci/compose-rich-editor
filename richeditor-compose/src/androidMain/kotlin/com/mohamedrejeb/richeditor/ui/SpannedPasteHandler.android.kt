@@ -45,6 +45,19 @@ private class AndroidSpannedPasteHandler(
             return htmlText
         }
 
+        // Check in-memory cache: if the clipboard plain text matches what was
+        // last copied from a RichTextState editor, use the cached HTML.
+        // This handles the case where Compose's newer LocalClipboard API
+        // bypasses our ClipboardManager override and doesn't set htmlText.
+        val clipPlainText = item.text?.toString()
+        if (clipPlainText != null) {
+            val cachedHtml = RichTextClipboardCache.match(clipPlainText)
+            if (cachedHtml != null) {
+                pasteLog(PASTE_TAG, "readHtml: using in-memory cached HTML (${cachedHtml.length} chars)")
+                return cachedHtml
+            }
+        }
+
         val text = item.text
         pasteLog(PASTE_TAG, "readHtml: htmlText=null, text type=${text?.javaClass?.simpleName ?: "null"}")
         if (text is Spanned) {
@@ -81,6 +94,14 @@ private class AndroidSpannedPasteHandler(
 
     override fun getHtmlIfMatch(addedText: String): String? {
         pasteLog(PASTE_TAG, "getHtmlIfMatch: checking clipboard for addedText=\"${addedText.take(80)}\"")
+
+        // Check in-memory cache first
+        val cachedHtml = RichTextClipboardCache.match(addedText)
+        if (cachedHtml != null) {
+            pasteLog(PASTE_TAG, "getHtmlIfMatch: using in-memory cached HTML (${cachedHtml.length} chars)")
+            return cachedHtml
+        }
+
         val clip = clipboardManager.primaryClip ?: run {
             pasteLog(PASTE_TAG, "getHtmlIfMatch: primaryClip is null")
             return null
