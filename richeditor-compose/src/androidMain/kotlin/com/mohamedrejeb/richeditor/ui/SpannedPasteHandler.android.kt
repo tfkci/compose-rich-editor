@@ -104,6 +104,12 @@ private class AndroidSpannedPasteHandler(
         return html
     }
 
+    override fun writeHtml(html: String, plainText: String): Boolean {
+        val clip = android.content.ClipData.newHtmlText("Rich Text", plainText, html)
+        clipboardManager.setPrimaryClip(clip)
+        return true
+    }
+
     @SuppressLint("NewApi")
     @Suppress("DEPRECATION")
     private fun spannedToHtml(spanned: Spanned): String =

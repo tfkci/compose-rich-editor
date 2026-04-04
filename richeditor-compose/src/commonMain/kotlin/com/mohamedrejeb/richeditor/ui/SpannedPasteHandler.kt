@@ -38,6 +38,16 @@ internal interface SpannedPasteHandler {
      * @return HTML string if the added text was a styled paste, `null` otherwise.
      */
     fun getHtmlIfMatch(addedText: String): String?
+
+    /**
+     * Writes rich content to the platform clipboard, setting both HTML and plain-text
+     * representations so that pasting into rich-text targets preserves formatting while
+     * plain-text targets still receive readable content.
+     *
+     * @return `true` if the platform clipboard was written successfully; `false` if unsupported,
+     *         in which case the caller should fall back to [ClipboardManager.setText].
+     */
+    fun writeHtml(html: String, plainText: String): Boolean
 }
 
 @Composable

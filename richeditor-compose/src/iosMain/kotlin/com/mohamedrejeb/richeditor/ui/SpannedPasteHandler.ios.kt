@@ -5,6 +5,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.mohamedrejeb.richeditor.model.RichTextState
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.allocArrayOf
+import kotlinx.cinterop.memScoped
 import platform.Foundation.NSData
 import platform.Foundation.NSString
 import platform.Foundation.NSUTF8StringEncoding
@@ -81,6 +84,22 @@ private class IosSpannedPasteHandler(
         pasteLog(PASTE_TAG, "iOS tryPasteSpanned: inserting HTML at cursor=${state.selection.max}")
         state.insertHtmlAfterSelection(html)
         pasteLog(PASTE_TAG, "iOS tryPasteSpanned: done")
+        return true
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    override fun writeHtml(html: String, plainText: String): Boolean {
+        val pasteboard = UIPasteboard.generalPasteboard
+        val htmlBytes = html.encodeToByteArray()
+        val htmlData = memScoped {
+            NSData.create(
+                bytes = allocArrayOf(htmlBytes),
+                length = htmlBytes.size.toULong()
+            )
+        }
+        pasteboard.setData(htmlData, forPasteboardType = HTML_UTI)
+        // Also set the plain text so non-rich targets receive readable content
+        pasteboard.string = plainText
         return true
     }
 

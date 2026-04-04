@@ -5,10 +5,14 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import com.mohamedrejeb.richeditor.annotation.ExperimentalRichTextApi
+import com.mohamedrejeb.richeditor.model.RichSpan
 import com.mohamedrejeb.richeditor.model.RichSpanStyle
 import com.mohamedrejeb.richeditor.model.RichTextState
+import com.mohamedrejeb.richeditor.paragraph.RichParagraph
 import com.mohamedrejeb.richeditor.paragraph.type.ParagraphType.Companion.startText
+import com.mohamedrejeb.richeditor.parser.html.RichTextStateHtmlParser
 import com.mohamedrejeb.richeditor.utils.append
+import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastForEachIndexed
 import kotlin.math.max
 import kotlin.math.min
@@ -53,6 +57,8 @@ internal class RichTextClipboardManager(
     @OptIn(ExperimentalRichTextApi::class)
     override fun setText(annotatedString: AnnotatedString) {
         val selection = richTextState.selection
+
+        // Build AnnotatedString for plain text extraction (existing logic)
         val richTextAnnotatedString = buildAnnotatedString {
             var index = 0
             richTextState.richParagraphList.fastForEachIndexed { i, richParagraphStyle ->
@@ -94,6 +100,100 @@ internal class RichTextClipboardManager(
                 }
             }
         }
+
+        val plainText = richTextAnnotatedString.text
+
+        // Try to write HTML + plain text to the platform clipboard.
+        // This bypasses the lossy AnnotatedString→Spanned→Html.toHtml() round-trip.
+        if (!selection.collapsed && plainText.isNotEmpty()) {
+            val html = buildSelectedHtml(selection)
+            if (html != null && spannedPasteHandler.writeHtml(html, plainText)) {
+                return
+            }
+        }
+
+        // Fallback: write AnnotatedString via Compose clipboard
         clipboardManager.setText(richTextAnnotatedString)
+    }
+
+    /**
+     * Builds HTML for the selected portion of the rich text state.
+     * Deep-copies the paragraphs that overlap the selection and trims
+     * edge spans to match the selection boundaries.
+     */
+    @OptIn(ExperimentalRichTextApi::class)
+    private fun buildSelectedHtml(selection: androidx.compose.ui.text.TextRange): String? {
+        if (selection.collapsed) return null
+
+        val selectedParagraphs = mutableListOf<RichParagraph>()
+        var index = 0
+
+        richTextState.richParagraphList.fastForEachIndexed { i, paragraph ->
+            if (i > 0) index++ // paragraph separator
+
+            val paraStart = index
+            index += paragraph.type.startText.length
+            val contentStart = index
+
+            // Walk spans to find paragraph end
+            index = computeSpanTreeEnd(paragraph.children, index)
+            val paraEnd = index
+
+            // Check if this paragraph overlaps with the selection
+            if (paraEnd > selection.min && paraStart < selection.max) {
+                val copy = paragraph.copy()
+                // Trim spans to the selection range
+                trimSpanTree(copy.children, contentStart, selection)
+                copy.removeEmptyChildren()
+                selectedParagraphs.add(copy)
+            }
+        }
+
+        if (selectedParagraphs.isEmpty()) return null
+
+        val tempState = RichTextState(initialRichParagraphList = selectedParagraphs)
+        return RichTextStateHtmlParser.decode(tempState)
+    }
+
+    /**
+     * Computes the text index after all spans in the tree.
+     */
+    private fun computeSpanTreeEnd(spans: List<RichSpan>, startIndex: Int): Int {
+        var index = startIndex
+        spans.fastForEach { span ->
+            index += span.text.length
+            index = computeSpanTreeEnd(span.children, index)
+        }
+        return index
+    }
+
+    /**
+     * Trims span text in-place so only the portion within [selection] remains.
+     * Spans entirely outside the selection have their text cleared.
+     */
+    private fun trimSpanTree(
+        spans: MutableList<RichSpan>,
+        startIndex: Int,
+        selection: androidx.compose.ui.text.TextRange,
+    ): Int {
+        var index = startIndex
+        spans.fastForEach { span ->
+            val spanStart = index
+            val spanEnd = spanStart + span.text.length
+
+            if (spanEnd <= selection.min || spanStart >= selection.max) {
+                // Span is entirely outside the selection — clear it
+                span.text = ""
+            } else {
+                // Trim to the selected portion
+                val trimStart = max(0, selection.min - spanStart)
+                val trimEnd = min(span.text.length, selection.max - spanStart)
+                span.text = span.text.substring(trimStart, trimEnd)
+            }
+
+            index = spanEnd
+            index = trimSpanTree(span.children, index, selection)
+        }
+        return index
     }
 }

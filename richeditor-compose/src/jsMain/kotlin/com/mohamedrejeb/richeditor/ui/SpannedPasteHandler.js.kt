@@ -7,6 +7,7 @@ private object NoOpSpannedPasteHandler : SpannedPasteHandler {
     override fun readHtml(): String? = null
     override fun tryPasteSpanned(): Boolean = false
     override fun getHtmlIfMatch(addedText: String): String? = null
+    override fun writeHtml(html: String, plainText: String): Boolean = false
 }
 
 @Composable
