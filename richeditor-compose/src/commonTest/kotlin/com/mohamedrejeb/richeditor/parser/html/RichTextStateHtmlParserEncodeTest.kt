@@ -443,4 +443,50 @@ class RichTextStateHtmlParserEncodeTest {
         assertEquals("Item3", fifthItem .text)
     }
 
+    @Test
+    fun testHtmlRoundTripPreservesParagraphs() {
+        // Simulate: user writes two paragraphs, copies, pastes
+        val state = RichTextState()
+        state.setHtml("<p>Eren</p><p>Tüfekçi</p>")
+
+        // Verify 2 paragraphs were created
+        assertEquals(2, state.richParagraphList.size, "setHtml should create 2 paragraphs")
+
+        val firstText = state.richParagraphList[0].children.firstOrNull()?.text ?: ""
+        val secondText = state.richParagraphList[1].children.firstOrNull()?.text ?: ""
+        assertEquals("Eren", firstText)
+        assertEquals("Tüfekçi", secondText)
+
+        // Now generate HTML (simulates what buildSelectedHtml does)
+        val html = state.toHtml()
+        println("Generated HTML: $html")
+
+        // Parse it back (simulates what paste does)
+        val pastedState = RichTextState()
+        pastedState.setHtml(html)
+
+        assertEquals(2, pastedState.richParagraphList.size, "Round-trip should preserve 2 paragraphs. HTML was: $html")
+
+        val pastedFirst = pastedState.richParagraphList[0].children.firstOrNull()?.text ?: ""
+        val pastedSecond = pastedState.richParagraphList[1].children.firstOrNull()?.text ?: ""
+        assertEquals("Eren", pastedFirst)
+        assertEquals("Tüfekçi", pastedSecond)
+    }
+
+    @Test
+    fun testInsertHtmlPreservesParagraphs() {
+        // Simulate pasting HTML into an empty editor
+        val targetState = RichTextState()
+        val html = "<p>Eren</p><p>Tüfekçi</p>"
+
+        targetState.insertHtmlAfterSelection(html)
+
+        println("After insertHtml: ${targetState.richParagraphList.size} paragraphs")
+        targetState.richParagraphList.forEachIndexed { i, p ->
+            println("  Paragraph $i: children=${p.children.map { it.text }}")
+        }
+
+        assertEquals(2, targetState.richParagraphList.size, "insertHtmlAfterSelection should create 2 paragraphs")
+    }
+
 }
