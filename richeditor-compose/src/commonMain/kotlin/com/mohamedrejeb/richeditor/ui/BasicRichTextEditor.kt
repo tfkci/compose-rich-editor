@@ -216,8 +216,8 @@ public fun BasicRichTextEditor(
         )
     }
     val originalToolbar = LocalTextToolbar.current
-    val richTextToolbar = remember(originalToolbar, pasteHandler) {
-        SpannedPasteTextToolbar(delegate = originalToolbar, pasteHandler = pasteHandler)
+    val richTextToolbar = remember(originalToolbar, pasteHandler, state) {
+        SpannedPasteTextToolbar(delegate = originalToolbar, pasteHandler = pasteHandler, richTextState = state)
     }
 
     // Wire the paste handler into state so onTextFieldValueChange can use it for the IME path.
@@ -273,6 +273,21 @@ public fun BasicRichTextEditor(
                         (event.isCtrlPressed || event.isMetaPressed) &&
                         pasteHandler.tryPasteSpanned()
                     ) return@onPreviewKeyEvent true
+
+                    // Intercept Ctrl+C / Cmd+C to write HTML to clipboard after default copy.
+                    if (event.type == KeyEventType.KeyDown &&
+                        event.key == Key.C &&
+                        (event.isCtrlPressed || event.isMetaPressed) &&
+                        !state.selection.collapsed
+                    ) {
+                        // Let the default copy happen first via onPreviewKeyEvent returning false,
+                        // then write HTML on KeyUp.
+                    } else if (event.type == KeyEventType.KeyUp &&
+                        event.key == Key.C &&
+                        (event.isCtrlPressed || event.isMetaPressed)
+                    ) {
+                        richTextToolbar.writeHtmlToClipboard()
+                    }
 
                     state.onPreviewKeyEvent(event)
                 }
@@ -357,6 +372,7 @@ public typealias RichTextChangedListener = (RichTextState) -> Unit
 private class SpannedPasteTextToolbar(
     private val delegate: TextToolbar,
     private val pasteHandler: SpannedPasteHandler,
+    private val richTextState: RichTextState,
 ) : TextToolbar {
 
     override val status: TextToolbarStatus get() = delegate.status
@@ -373,9 +389,9 @@ private class SpannedPasteTextToolbar(
     ) {
         delegate.showMenu(
             rect = rect,
-            onCopyRequested = onCopyRequested,
+            onCopyRequested = wrapCopy(onCopyRequested),
             onPasteRequested = wrapPaste(onPasteRequested),
-            onCutRequested = onCutRequested,
+            onCutRequested = wrapCopy(onCutRequested),
             onSelectAllRequested = onSelectAllRequested,
             onAutofillRequested = onAutofillRequested,
         )
@@ -391,9 +407,9 @@ private class SpannedPasteTextToolbar(
     ) {
         delegate.showMenu(
             rect = rect,
-            onCopyRequested = onCopyRequested,
+            onCopyRequested = wrapCopy(onCopyRequested),
             onPasteRequested = wrapPaste(onPasteRequested),
-            onCutRequested = onCutRequested,
+            onCutRequested = wrapCopy(onCutRequested),
             onSelectAllRequested = onSelectAllRequested,
         )
     }
@@ -401,4 +417,49 @@ private class SpannedPasteTextToolbar(
     private fun wrapPaste(original: (() -> Unit)?): (() -> Unit)? =
         if (original == null) null
         else ({ if (!pasteHandler.tryPasteSpanned()) original() })
+
+    /**
+     * Wraps copy/cut so that after the default copy places content on the clipboard,
+     * we overwrite it with clean HTML + plain text.  This ensures paragraph structure
+     * is preserved across copy-paste, bypassing the lossy Spanned→Html.toHtml()
+     * conversion that newer Compose versions produce when BasicTextField copies via
+     * the LocalClipboard API (which ignores our LocalClipboardManager override).
+     */
+    private fun wrapCopy(original: (() -> Unit)?): (() -> Unit)? =
+        if (original == null) null
+        else ({
+            // Let the default copy/cut run first — it places content on the system clipboard
+            // and (for cut) deletes the selected text.
+            original()
+            // Now overwrite the clipboard with our clean HTML.
+            writeHtmlToClipboard()
+        })
+
+    /**
+     * Writes the current rich text state as HTML to the system clipboard.
+     * Called after the framework's default copy/cut has already placed
+     * plain text / Spanned content on the clipboard.
+     */
+    fun writeHtmlToClipboard() {
+        try {
+            val html = richTextState.toHtml()
+            // Build plain text with real newlines between paragraphs
+            val plainText = buildString {
+                richTextState.richParagraphList.forEachIndexed { i, paragraph ->
+                    if (i > 0) append('\n')
+                    fun appendSpanText(span: com.mohamedrejeb.richeditor.model.RichSpan) {
+                        append(span.text)
+                        span.children.forEach { appendSpanText(it) }
+                    }
+                    paragraph.children.forEach { appendSpanText(it) }
+                }
+            }
+            if (html.isNotEmpty()) {
+                pasteLog(PASTE_TAG, "wrapCopy: writing HTML to clipboard (${html.length} chars)")
+                pasteHandler.writeHtml(html, plainText)
+            }
+        } catch (e: Exception) {
+            pasteLog(PASTE_TAG, "wrapCopy: failed to write HTML — ${e.message}")
+        }
+    }
 }
