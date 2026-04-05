@@ -23,13 +23,18 @@ import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.Clipboard
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.NativeClipboard
 import androidx.compose.ui.platform.TextToolbar
 import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -220,6 +225,27 @@ public fun BasicRichTextEditor(
         SpannedPasteTextToolbar(delegate = originalToolbar, pasteHandler = pasteHandler, richTextState = state)
     }
 
+    // Wrap the new Clipboard API (Compose 1.7+) to intercept copy and write HTML.
+    // BasicTextField uses LocalClipboard.setClipEntry() for copy, completely bypassing
+    // both LocalClipboardManager and TextToolbar callbacks.
+    val originalClipboard = LocalClipboard.current
+    val richClipboard = remember(originalClipboard, state, pasteHandler) {
+        RichTextClipboard(
+            delegate = originalClipboard,
+            richTextState = state,
+            spannedPasteHandler = pasteHandler,
+        )
+    }
+
+    // Track the last non-collapsed selection so that RichTextClipboard can use it.
+    // BasicTextField collapses the selection BEFORE calling Clipboard.setClipEntry(),
+    // so by the time setClipEntry runs, richTextState.selection is already collapsed.
+    LaunchedEffect(state.selection) {
+        if (!state.selection.collapsed) {
+            richClipboard.lastNonCollapsedSelection = state.selection
+        }
+    }
+
     // Wire the paste handler into state so onTextFieldValueChange can use it for the IME path.
     SideEffect {
         state.spannedPasteHandler = pasteHandler
@@ -252,6 +278,7 @@ public fun BasicRichTextEditor(
 
     CompositionLocalProvider(
         LocalClipboardManager provides richClipboardManager,
+        LocalClipboard provides richClipboard,
         LocalTextToolbar provides richTextToolbar,
     ) {
         BasicTextField(
@@ -274,19 +301,17 @@ public fun BasicRichTextEditor(
                         pasteHandler.tryPasteSpanned()
                     ) return@onPreviewKeyEvent true
 
-                    // Intercept Ctrl+C / Cmd+C to write HTML to clipboard after default copy.
+                    // Intercept Ctrl+C / Cmd+C — handle copy entirely ourselves
+                    // so the framework's async clipboard write cannot overwrite our HTML.
                     if (event.type == KeyEventType.KeyDown &&
                         event.key == Key.C &&
                         (event.isCtrlPressed || event.isMetaPressed) &&
                         !state.selection.collapsed
                     ) {
-                        // Let the default copy happen first via onPreviewKeyEvent returning false,
-                        // then write HTML on KeyUp.
-                    } else if (event.type == KeyEventType.KeyUp &&
-                        event.key == Key.C &&
-                        (event.isCtrlPressed || event.isMetaPressed)
-                    ) {
-                        richTextToolbar.writeHtmlToClipboard()
+                        val sel = state.selection
+                        richTextToolbar.writeHtmlToClipboard(sel)
+                        state.selection = TextRange(sel.max)
+                        return@onPreviewKeyEvent true // consume — don't let framework also copy
                     }
 
                     state.onPreviewKeyEvent(event)
@@ -391,7 +416,7 @@ private class SpannedPasteTextToolbar(
             rect = rect,
             onCopyRequested = wrapCopy(onCopyRequested),
             onPasteRequested = wrapPaste(onPasteRequested),
-            onCutRequested = wrapCopy(onCutRequested),
+            onCutRequested = wrapCut(onCutRequested),
             onSelectAllRequested = onSelectAllRequested,
             onAutofillRequested = onAutofillRequested,
         )
@@ -409,7 +434,7 @@ private class SpannedPasteTextToolbar(
             rect = rect,
             onCopyRequested = wrapCopy(onCopyRequested),
             onPasteRequested = wrapPaste(onPasteRequested),
-            onCutRequested = wrapCopy(onCutRequested),
+            onCutRequested = wrapCut(onCutRequested),
             onSelectAllRequested = onSelectAllRequested,
         )
     }
@@ -419,52 +444,173 @@ private class SpannedPasteTextToolbar(
         else ({ if (!pasteHandler.tryPasteSpanned()) original() })
 
     /**
-     * Wraps copy/cut so that after the default copy places content on the clipboard,
-     * we overwrite it with clean HTML + plain text.  This ensures paragraph structure
-     * is preserved across copy-paste, bypassing the lossy Spanned→Html.toHtml()
-     * conversion that newer Compose versions produce when BasicTextField copies via
-     * the LocalClipboard API (which ignores our LocalClipboardManager override).
+     * Wraps the COPY action.
+     *
+     * We do NOT call [original] at all because on newer Compose versions the
+     * framework writes to the clipboard asynchronously via the suspend
+     * `Clipboard.setClipEntry` API, which can overwrite our HTML **after**
+     * we write it.  Instead we write HTML + plain text ourselves and then
+     * collapse the selection so the UI behaves as if a normal copy happened.
      */
     private fun wrapCopy(original: (() -> Unit)?): (() -> Unit)? =
         if (original == null) null
         else ({
-            // Let the default copy/cut run first — it places content on the system clipboard
-            // and (for cut) deletes the selected text.
+            val selection = richTextState.selection
+            if (!selection.collapsed) {
+                writeHtmlToClipboard(selection)
+                richTextState.selection = TextRange(selection.max)
+            } else {
+                original()
+            }
+        })
+
+    /**
+     * Wraps the CUT action.
+     *
+     * For cut we still need [original] because it deletes the selected text
+     * from the text field.  We capture the selection first, write HTML to
+     * the clipboard, and then let the framework delete the selection.
+     * The framework's async clipboard write will be ignored because
+     * the in-memory cache will match on paste.
+     */
+    private fun wrapCut(original: (() -> Unit)?): (() -> Unit)? =
+        if (original == null) null
+        else ({
+            val selectionBeforeCut = richTextState.selection
+            // Write HTML to clipboard BEFORE the framework deletes the text.
+            writeHtmlToClipboard(selectionBeforeCut)
+            // Let the framework handle the deletion (and its own clipboard write).
             original()
-            // Now overwrite the clipboard with our clean HTML.
-            writeHtmlToClipboard()
         })
 
     /**
      * Writes the current rich text state as HTML to the system clipboard.
      * Called after the framework's default copy/cut has already placed
      * plain text / Spanned content on the clipboard.
+     *
+     * @param selection The text range to export. Must be captured BEFORE
+     *   the framework copy runs, because it clears the selection.
+     *   Falls back to the current selection if not provided.
      */
-    fun writeHtmlToClipboard() {
+    fun writeHtmlToClipboard(selection: TextRange = richTextState.selection) {
         try {
-            val html = richTextState.toHtml()
-            // Build plain text with real newlines between paragraphs
+            if (selection.collapsed) return
+
+            val html = richTextState.toHtml(selection)
+            // Build plain text with newlines between paragraphs, only for selected content
+            val selectedParagraphs = richTextState.getRichParagraphListByTextRange(selection)
             val plainText = buildString {
-                richTextState.richParagraphList.forEachIndexed { i, paragraph ->
+                selectedParagraphs.forEachIndexed { i, paragraph ->
                     if (i > 0) append('\n')
                     fun appendSpanText(span: com.mohamedrejeb.richeditor.model.RichSpan) {
-                        append(span.text)
+                        // Clip span text to the selection range
+                        val spanStart = span.textRange.start
+                        val spanEnd = span.textRange.end
+                        if (spanStart < selection.max && spanEnd > selection.min && span.text.isNotEmpty()) {
+                            val clipStart = maxOf(selection.min, spanStart) - spanStart
+                            val clipEnd = minOf(selection.max, spanEnd) - spanStart
+                            append(span.text.substring(
+                                clipStart.coerceIn(0, span.text.length),
+                                clipEnd.coerceIn(0, span.text.length),
+                            ))
+                        }
                         span.children.forEach { appendSpanText(it) }
                     }
                     paragraph.children.forEach { appendSpanText(it) }
                 }
             }
+            // Also capture the internal (space-separated) representation of the selection
+            val internalText = richTextState.textFieldValue.text
+            val selectedInternalText = internalText.substring(
+                selection.min.coerceIn(0, internalText.length),
+                selection.max.coerceIn(0, internalText.length),
+            )
+
             if (html.isNotEmpty()) {
-                // Always cache in-memory so paste can find it even if
-                // platform clipboard doesn't preserve htmlText.
-                // Store both newline-separated and the internal space-separated text.
-                val internalText = richTextState.textFieldValue.text
-                RichTextClipboardCache.store(html, plainText, internalText)
-                pasteLog(PASTE_TAG, "wrapCopy: writing HTML to clipboard (${html.length} chars)")
+                RichTextClipboardCache.store(html, plainText, selectedInternalText)
                 pasteHandler.writeHtml(html, plainText)
             }
-        } catch (e: Exception) {
-            pasteLog(PASTE_TAG, "wrapCopy: failed to write HTML — ${e.message}")
+        } catch (_: Exception) {
+        }
+    }
+}
+
+/**
+ * Wraps the new Compose [Clipboard] API (1.7+) to intercept copy operations.
+ *
+ * [BasicTextField] in Compose 1.7+ calls [Clipboard.setClipEntry] directly for copy,
+ * bypassing both [LocalClipboardManager] and [TextToolbar] callbacks. This wrapper
+ * intercepts [setClipEntry] to:
+ * 1. Let the framework write the clip entry (plain text)
+ * 2. Immediately overwrite the system clipboard with HTML + plain text via [SpannedPasteHandler]
+ * 3. Cache the HTML in [RichTextClipboardCache] for reliable paste matching
+ */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+private class RichTextClipboard(
+    private val delegate: Clipboard,
+    private val richTextState: RichTextState,
+    private val spannedPasteHandler: SpannedPasteHandler,
+) : Clipboard {
+
+    /**
+     * The last non-collapsed selection observed via LaunchedEffect in BasicRichTextEditor.
+     * BasicTextField collapses the selection BEFORE calling [setClipEntry], so
+     * [richTextState.selection] is already collapsed when we get here.
+     * This field preserves what was selected at the time of copy.
+     */
+    var lastNonCollapsedSelection: TextRange? = null
+
+    override val nativeClipboard: NativeClipboard get() = delegate.nativeClipboard
+
+    override suspend fun getClipEntry(): ClipEntry? {
+        return delegate.getClipEntry()
+    }
+
+    override suspend fun setClipEntry(clipEntry: ClipEntry?) {
+        val selection = lastNonCollapsedSelection ?: richTextState.selection
+
+        // Let the framework write the clip entry first.
+        delegate.setClipEntry(clipEntry)
+
+        // Now overwrite with HTML if we have a valid selection.
+        if (!selection.collapsed) {
+            try {
+                val html = richTextState.toHtml(selection)
+                if (html.isNotEmpty()) {
+                    // Build plain text from selected spans
+                    val selectedParagraphs = richTextState.getRichParagraphListByTextRange(selection)
+                    val plainText = buildString {
+                        selectedParagraphs.forEachIndexed { i, paragraph ->
+                            if (i > 0) append('\n')
+                            fun appendSpanText(span: com.mohamedrejeb.richeditor.model.RichSpan) {
+                                val spanStart = span.textRange.start
+                                val spanEnd = span.textRange.end
+                                if (spanStart < selection.max && spanEnd > selection.min && span.text.isNotEmpty()) {
+                                    val clipStart = maxOf(selection.min, spanStart) - spanStart
+                                    val clipEnd = minOf(selection.max, spanEnd) - spanStart
+                                    append(span.text.substring(
+                                        clipStart.coerceIn(0, span.text.length),
+                                        clipEnd.coerceIn(0, span.text.length),
+                                    ))
+                                }
+                                span.children.forEach { appendSpanText(it) }
+                            }
+                            paragraph.children.forEach { appendSpanText(it) }
+                        }
+                    }
+                    val internalText = richTextState.textFieldValue.text
+                    val selectedInternalText = internalText.substring(
+                        selection.min.coerceIn(0, internalText.length),
+                        selection.max.coerceIn(0, internalText.length),
+                    )
+
+                    RichTextClipboardCache.store(html, plainText, selectedInternalText)
+                    spannedPasteHandler.writeHtml(html, plainText)
+                }
+            } catch (_: Exception) {
+            }
+            // Clear the saved selection so it's not reused for unrelated clipboard writes.
+            lastNonCollapsedSelection = null
         }
     }
 }

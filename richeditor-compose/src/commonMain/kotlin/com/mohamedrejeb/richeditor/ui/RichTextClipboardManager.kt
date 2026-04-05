@@ -26,25 +26,30 @@ internal object RichTextClipboardCache {
     var cachedHtml: String? = null
     private var cachedPlainTexts: List<String> = emptyList()
 
+    /** Collapse all whitespace (spaces, newlines, tabs, etc.) into single spaces and trim. */
+    private fun normalizeWhitespace(text: String): String =
+        text.trim().replace(Regex("\\s+"), " ")
+
     fun store(html: String, vararg plainTextVariants: String) {
         cachedHtml = html
         cachedPlainTexts = plainTextVariants.toList()
-        pasteLog(PASTE_TAG, "ClipboardCache.store: html=${html.take(120)}, variants=${plainTextVariants.map { it.take(40) }}")
     }
 
     /**
      * Returns cached HTML if the given [clipboardPlainText] matches any stored variant.
+     * Matching is done both exactly (after trimEnd) and with normalized whitespace,
+     * because paragraph separators may differ between the internal text representation
+     * (spaces), the AnnotatedString (newlines), and what the IME inserts.
      */
     fun match(clipboardPlainText: String): String? {
         val html = cachedHtml ?: return null
         val trimmedInput = clipboardPlainText.trimEnd()
+        val normalizedInput = normalizeWhitespace(clipboardPlainText)
+
         for (variant in cachedPlainTexts) {
-            if (variant.trimEnd() == trimmedInput) {
-                pasteLog(PASTE_TAG, "ClipboardCache.match: HIT — returning cached HTML (${html.length} chars)")
-                return html
-            }
+            if (variant.trimEnd() == trimmedInput) return html
+            if (normalizeWhitespace(variant) == normalizedInput) return html
         }
-        pasteLog(PASTE_TAG, "ClipboardCache.match: MISS — clip=\"${clipboardPlainText.take(40)}\"")
         return null
     }
 }
@@ -139,16 +144,20 @@ internal class RichTextClipboardManager(
         // the platform clipboard doesn't preserve htmlText.
         if (!selection.collapsed && plainText.isNotEmpty()) {
             val html = try {
-                richTextState.toHtml()
+                richTextState.toHtml(selection)
             } catch (_: Exception) {
                 null
             }
             if (html != null) {
                 // Cache in-memory for self-paste.
-                // Store the internal text (spaces between paragraphs) and
-                // the AnnotatedString text (may have newlines) as match variants.
+                // Store the selected portion of internal text (spaces between paragraphs)
+                // and the AnnotatedString text (may have newlines) as match variants.
                 val internalText = richTextState.textFieldValue.text
-                RichTextClipboardCache.store(html, plainText, internalText)
+                val selectedInternalText = internalText.substring(
+                    selection.min.coerceIn(0, internalText.length),
+                    selection.max.coerceIn(0, internalText.length),
+                )
+                RichTextClipboardCache.store(html, plainText, selectedInternalText)
 
                 // Also try to write HTML directly to platform clipboard
                 pasteLog(PASTE_TAG, "setText: writing HTML to clipboard (${html.length} chars)")

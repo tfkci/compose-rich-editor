@@ -4168,6 +4168,18 @@ public class RichTextState internal constructor(
     }
 
     /**
+     * Decodes only the selected portion of the [RichTextState] to an HTML string.
+     * If the selection is collapsed (cursor with no selection), returns an empty string.
+     *
+     * @param selection The text range to export as HTML.
+     * @return The HTML string for the selected content.
+     */
+    public fun toHtml(selection: TextRange): String {
+        if (selection.collapsed) return ""
+        return RichTextStateHtmlParser.decodeSelectedHtml(this, selection)
+    }
+
+    /**
      * Decodes the [RichTextState] to a markdown string.
      *
      * @return The html string.

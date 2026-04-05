@@ -565,6 +565,214 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
         }
     }
 
+    /**
+     * Decodes only the selected portion of a [RichTextState] to an HTML string.
+     * Unlike [decode], which serializes the entire document, this method clips
+     * span text to the intersection of [selectionRange] and each span's textRange.
+     */
+    internal fun decodeSelectedHtml(
+        richTextState: RichTextState,
+        selectionRange: TextRange,
+    ): String {
+        if (selectionRange.collapsed) return ""
+
+        val selectedParagraphs = richTextState.getRichParagraphListByTextRange(selectionRange)
+        if (selectedParagraphs.isEmpty()) return ""
+
+        val builder = StringBuilder()
+
+        val openedListTagNames = mutableListOf<String>()
+        var lastParagraphGroupTagName: String? = null
+        var lastParagraphGroupLevel = 0
+        var isLastParagraphEmpty = false
+
+        selectedParagraphs.fastForEachIndexed { index, richParagraph ->
+            val richParagraphType = richParagraph.type
+            val isParagraphEmpty = richParagraph.isEmpty()
+            val paragraphGroupTagName = decodeHtmlElementFromRichParagraphType(richParagraph.type)
+
+            val paragraphLevel =
+                if (richParagraphType is ConfigurableListLevel)
+                    richParagraphType.level
+                else
+                    0
+
+            val isParagraphList = paragraphGroupTagName in listOf("ol", "ul")
+            val isLastParagraphList = lastParagraphGroupTagName in listOf("ol", "ul")
+
+            fun isCloseParagraphGroup(): Boolean {
+                if (!isLastParagraphList) return false
+                if (paragraphLevel > lastParagraphGroupLevel) return false
+                if (lastParagraphGroupTagName == paragraphGroupTagName &&
+                    paragraphLevel == lastParagraphGroupLevel
+                ) return false
+                return true
+            }
+
+            fun isCloseAllOpenedTags(): Boolean {
+                if (isParagraphList) return false
+                if (!isLastParagraphList) return false
+                return true
+            }
+
+            fun isOpenParagraphGroup(): Boolean {
+                if (!isParagraphList) return false
+                if (isLastParagraphList &&
+                    paragraphGroupTagName == openedListTagNames.lastOrNull() &&
+                    paragraphLevel < lastParagraphGroupLevel
+                ) return false
+                if (isLastParagraphList &&
+                    paragraphLevel == lastParagraphGroupLevel &&
+                    paragraphGroupTagName == lastParagraphGroupTagName
+                ) return false
+                return true
+            }
+
+            if (isCloseAllOpenedTags()) {
+                openedListTagNames.fastForEachReversed {
+                    builder.append("</$it>")
+                }
+                openedListTagNames.clear()
+            } else if (isCloseParagraphGroup()) {
+                builder.append("</$lastParagraphGroupTagName>")
+                openedListTagNames.removeLastOrNull()
+                if (isLastParagraphList && paragraphLevel < lastParagraphGroupLevel) {
+                    repeat(lastParagraphGroupLevel - paragraphLevel) {
+                        openedListTagNames.removeLastOrNull()?.let {
+                            builder.append("</$it>")
+                        }
+                    }
+                }
+            }
+
+            if (isOpenParagraphGroup()) {
+                builder.append("<$paragraphGroupTagName>")
+                openedListTagNames.add(paragraphGroupTagName)
+            }
+
+            fun isLineBreak(): Boolean {
+                if (!isParagraphEmpty) return false
+                if (isParagraphList && lastParagraphGroupTagName != paragraphGroupTagName) return false
+                return true
+            }
+
+            if (isLineBreak()) {
+                val skipAddingBr =
+                    isLastParagraphEmpty && richParagraph.isEmpty() && index == selectedParagraphs.lastIndex
+                if (!skipAddingBr) builder.append("<$BrElement>")
+            } else {
+                val paragraphTagName =
+                    if (paragraphGroupTagName == "ol" || paragraphGroupTagName == "ul") "li"
+                    else "p"
+
+                val paragraphCssMap = CssDecoder.decodeParagraphStyleToCssStyleMap(richParagraph.paragraphStyle)
+                val paragraphCss = CssDecoder.decodeCssStyleMap(paragraphCssMap)
+
+                builder.append("<$paragraphTagName")
+                if (paragraphCss.isNotBlank()) builder.append(" style=\"$paragraphCss\"")
+                builder.append(">")
+
+                richParagraph.children.fastForEach { richSpan ->
+                    builder.append(decodeRichSpanToHtmlClipped(richSpan, selectionRange))
+                }
+
+                builder.append("</$paragraphTagName>")
+            }
+
+            lastParagraphGroupTagName = paragraphGroupTagName
+            lastParagraphGroupLevel = paragraphLevel
+            isLastParagraphEmpty = isParagraphEmpty
+        }
+
+        openedListTagNames.fastForEachReversed {
+            builder.append("</$it>")
+        }
+        openedListTagNames.clear()
+
+        return builder.toString()
+    }
+
+    /**
+     * Serializes a [RichSpan] to HTML, clipping its text to [selectionRange].
+     * Child spans whose full range doesn't overlap the selection are skipped.
+     */
+    @OptIn(ExperimentalRichTextApi::class)
+    private fun decodeRichSpanToHtmlClipped(
+        richSpan: RichSpan,
+        selectionRange: TextRange,
+        parentFormattingTags: List<String> = emptyList(),
+    ): String {
+        if (richSpan.isEmpty()) return ""
+
+        // Check if this span (including children) overlaps the selection at all
+        val spanFullRange = richSpan.fullTextRange
+        if (spanFullRange.max <= selectionRange.min || spanFullRange.min >= selectionRange.max) {
+            return ""
+        }
+
+        val stringBuilder = StringBuilder()
+
+        // Get HTML element and attributes
+        val spanHtml = decodeHtmlElementFromRichSpanStyle(richSpan.richSpanStyle)
+        val tagName = spanHtml.first
+        val tagAttributes = spanHtml.second
+
+        val tagAttributesStringBuilder = StringBuilder()
+        tagAttributes.forEach { (key, value) ->
+            tagAttributesStringBuilder.append(" $key=\"$value\"")
+        }
+
+        val htmlStyleFormat = CssDecoder.decodeSpanStyleToHtmlStylingFormat(richSpan.spanStyle)
+        val spanCss = CssDecoder.decodeCssStyleMap(htmlStyleFormat.cssStyleMap)
+        val htmlTags = htmlStyleFormat.htmlTags.filter { it !in parentFormattingTags }
+
+        val isRequireOpeningTag = tagName != "span" || tagAttributes.isNotEmpty() || spanCss.isNotEmpty()
+
+        if (isRequireOpeningTag) {
+            stringBuilder.append("<$tagName$tagAttributesStringBuilder")
+            if (spanCss.isNotEmpty()) stringBuilder.append(" style=\"$spanCss\"")
+            stringBuilder.append(">")
+        }
+
+        htmlTags.forEach {
+            stringBuilder.append("<$it>")
+        }
+
+        // Clip the span's own text to the selection range
+        val spanStart = richSpan.textRange.start
+        val spanEnd = richSpan.textRange.end
+        if (spanStart < selectionRange.max && spanEnd > selectionRange.min && richSpan.text.isNotEmpty()) {
+            val clipStart = maxOf(selectionRange.min, spanStart) - spanStart
+            val clipEnd = minOf(selectionRange.max, spanEnd) - spanStart
+            val clippedText = richSpan.text.substring(
+                clipStart.coerceIn(0, richSpan.text.length),
+                clipEnd.coerceIn(0, richSpan.text.length),
+            )
+            stringBuilder.append(KsoupEntities.encodeHtml(clippedText))
+        }
+
+        // Recurse into children
+        richSpan.children.fastForEach { child ->
+            stringBuilder.append(
+                decodeRichSpanToHtmlClipped(
+                    richSpan = child,
+                    selectionRange = selectionRange,
+                    parentFormattingTags = parentFormattingTags + htmlTags,
+                )
+            )
+        }
+
+        htmlTags.reversed().forEach {
+            stringBuilder.append("</$it>")
+        }
+
+        if (isRequireOpeningTag) {
+            stringBuilder.append("</$tagName>")
+        }
+
+        return stringBuilder.toString()
+    }
+
 }
 
 /**
