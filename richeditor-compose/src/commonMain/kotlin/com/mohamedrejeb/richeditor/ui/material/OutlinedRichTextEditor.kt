@@ -121,7 +121,7 @@ public fun OutlinedRichTextEditor(
             .background(colors.backgroundColor(enabled).value, shape)
             .defaultMinSize(
                 minWidth = TextFieldDefaults.MinWidth,
-                minHeight = TextFieldDefaults.MinHeight
+                minHeight = 42.dp
             ),
         enabled = enabled,
         readOnly = readOnly,

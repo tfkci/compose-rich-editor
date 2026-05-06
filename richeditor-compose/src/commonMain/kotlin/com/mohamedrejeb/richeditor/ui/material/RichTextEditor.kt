@@ -19,6 +19,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
 import com.mohamedrejeb.richeditor.model.RichTextState
 import com.mohamedrejeb.richeditor.ui.BasicRichTextEditor
 import com.mohamedrejeb.richeditor.ui.RichTextChangedListener
@@ -122,7 +123,7 @@ public fun RichTextEditor(
             .indicatorLine(enabled, isError, interactionSource, colors)
             .defaultMinSize(
                 minWidth = TextFieldDefaults.MinWidth,
-                minHeight = TextFieldDefaults.MinHeight
+                minHeight = 42.dp
             ),
         enabled = enabled,
         readOnly = readOnly,

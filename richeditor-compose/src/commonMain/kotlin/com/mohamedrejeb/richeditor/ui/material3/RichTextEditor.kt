@@ -130,7 +130,7 @@ public fun RichTextEditor(
             modifier = modifier
                 .defaultMinSize(
                     minWidth = TextFieldDefaults.MinWidth,
-                    minHeight = TextFieldDefaults.MinHeight
+                    minHeight = RichTextEditorDefaults.MinHeight
                 ),
             enabled = enabled,
             readOnly = readOnly,

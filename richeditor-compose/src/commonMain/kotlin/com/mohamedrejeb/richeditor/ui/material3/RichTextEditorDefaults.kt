@@ -51,7 +51,7 @@ public object RichTextEditorDefaults {
      * The default min width applied for a [TextField] and [OutlinedTextField].
      * Note that you can override it by applying Modifier.heightIn directly on a text field.
      */
-    public val MinHeight: Dp = 56.dp
+    public val MinHeight: Dp = 42.dp
 
     /**
      * The default min width applied for a [TextField] and [OutlinedTextField].
