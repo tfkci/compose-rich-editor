@@ -2025,47 +2025,58 @@ public class RichTextState internal constructor(
         // never fires at line breaks. We intercept here, before rich-text processing,
         // so spans/formatting on the capitalized character are applied correctly.
         val intercepted = run {
-            val collapsed = newTextFieldValue.selection.collapsed
-            val cursor = newTextFieldValue.selection.end
             val newText = newTextFieldValue.text
             val oldText = textFieldValue.text
-            if (collapsed && newText.length == oldText.length + 1) {
-                val justTyped = newText.getOrNull(cursor - 1)
-                when {
-                    justTyped == '\n' -> {
-                        shouldCapitalizeNextChar = true
-                        newTextFieldValue
-                    }
-                    // Positional guard: only capitalize when the cursor is sitting
-                    // directly after a paragraph boundary, regardless of where the flag
-                    // was armed. updateAnnotatedString renders the inter-paragraph break
-                    // as a literal space (see RichTextState line ~2411 `append(' ')`), so
-                    // by the time the *next* keystroke arrives, cursor-2 is ' ', not '\n'.
-                    // Accept either character — both indicate the cursor is one position
-                    // past a paragraph break. This still rejects "tap-into-middle-of-word
-                    // and type" because cursor-2 there would be a regular letter.
-                    shouldCapitalizeNextChar &&
-                            justTyped != null && justTyped.isLetter() && justTyped.isLowerCase() &&
-                            newText.getOrNull(cursor - 2)?.let { it == '\n' || it == ' ' } == true -> {
-                        shouldCapitalizeNextChar = false
-                        val capitalized = newText.substring(0, cursor - 1) +
-                            justTyped.uppercaseChar() +
-                            newText.substring(cursor)
-                        newTextFieldValue.copy(text = capitalized)
-                    }
-                    else -> {
-                        shouldCapitalizeNextChar = false
-                        newTextFieldValue
-                    }
-                }
-            } else {
-                // Paste, autocorrect, or any multi-char change — disarm.
-                // Pure selection moves (text unchanged) intentionally keep the flag
-                // so a cursor jump right after \n still gets the capitalize offer,
-                // but the positional guard above ensures it only fires at the \n boundary.
-                if (newText.length != oldText.length) shouldCapitalizeNextChar = false
-                newTextFieldValue
+            val cursor = newTextFieldValue.selection.end
+            val collapsed = newTextFieldValue.selection.collapsed
+
+            // Arm whenever the text gains a newline — robust to single-char inserts,
+            // multi-char paste/autocorrect, gesture typing, and predictive-text
+            // commits that bundle Enter together with surrounding chars. We don't
+            // require length == old+1 because Samsung-style IMEs sometimes deliver
+            // the newline inside a larger composition replacement.
+            val newlineAdded = newText.count { it == '\n' } > oldText.count { it == '\n' }
+            if (newlineAdded) {
+                shouldCapitalizeNextChar = true
             }
+
+            // Capitalize the very next single lowercase letter typed at the cursor,
+            // but only if cursor-2 is a paragraph boundary (literal '\n' before the
+            // library re-renders, or ' ' after — see updateAnnotatedString line ~2411
+            // `append(' ')` for the inter-paragraph space). The positional guard
+            // rejects "tap into middle of word, then type" because cursor-2 would
+            // be a regular letter there.
+            if (
+                shouldCapitalizeNextChar && collapsed && !newlineAdded &&
+                newText.length == oldText.length + 1
+            ) {
+                val justTyped = newText.getOrNull(cursor - 1)
+                val prevChar = newText.getOrNull(cursor - 2)
+                if (
+                    justTyped != null && justTyped.isLetter() && justTyped.isLowerCase() &&
+                    (prevChar == '\n' || prevChar == ' ')
+                ) {
+                    shouldCapitalizeNextChar = false
+                    val capitalized = newText.substring(0, cursor - 1) +
+                        justTyped.uppercaseChar() +
+                        newText.substring(cursor)
+                    return@run newTextFieldValue.copy(text = capitalized)
+                } else {
+                    // Single-char change that isn't a capitalizable letter at the
+                    // boundary — disarm so we don't accidentally fire later.
+                    shouldCapitalizeNextChar = false
+                }
+            } else if (
+                !newlineAdded && newText.length != oldText.length
+            ) {
+                // Multi-char change that didn't add a newline (paste, autocorrect,
+                // long-suggestion accept). Disarm to avoid mis-capitalizing the
+                // next letter the user types after this committed block.
+                shouldCapitalizeNextChar = false
+            }
+            // Pure selection moves (length unchanged) intentionally keep the flag.
+
+            newTextFieldValue
         }
 
         tempTextFieldValue = intercepted
