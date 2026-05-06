@@ -1947,6 +1947,14 @@ public class RichTextState internal constructor(
     private var shouldCapitalizeNextChar = false
 
     /**
+     * Set to true right after Enter creates a new list paragraph with startText.
+     * The next handleRemovingCharacters call should NOT exit the list, because the
+     * "removal" Compose dispatches is a TextField resync after we programmatically
+     * inserted the bullet/number prefix — not a user-initiated backspace.
+     */
+    private var justInsertedListParagraph = false
+
+    /**
      * Handles the new text field value.
      *
      * @param newTextFieldValue the new text field value.
@@ -2058,9 +2066,12 @@ public class RichTextState internal constructor(
 
         tempTextFieldValue = intercepted
 
-        if (tempTextFieldValue.text.length > textFieldValue.text.length)
+        if (tempTextFieldValue.text.length > textFieldValue.text.length) {
+            // Disarm before the add path; handleAddingCharacters will arm again
+            // if it inserts a new list paragraph with startText.
+            justInsertedListParagraph = false
             handleAddingCharacters()
-        else if (tempTextFieldValue.text.length < textFieldValue.text.length) {
+        } else if (tempTextFieldValue.text.length < textFieldValue.text.length) {
             val newNewlineCount = tempTextFieldValue.text.count { it == '\n' }
             val oldNewlineCount = textFieldValue.text.count { it == '\n' }
             val isImeRevert = newNewlineCount > oldNewlineCount
@@ -2361,11 +2372,15 @@ public class RichTextState internal constructor(
         // measures the prefix and corrects it.
         applyCachedStartTextWidths()
 
+        // Collect paragraph indices to remove after iteration — mutating the
+        // backing SnapshotStateList inside fastForEachIndexed causes
+        // IndexOutOfBoundsException because the loop captured the original size.
+        val paragraphIndicesToRemove = mutableListOf<Int>()
         annotatedString = buildAnnotatedString {
             var index = 0
             richParagraphList.fastForEachIndexed { i, richParagraph ->
                 if (index > newText.length) {
-                    richParagraphList.removeAt(i)
+                    paragraphIndicesToRemove.add(i)
                     return@fastForEachIndexed
                 }
 
@@ -2398,6 +2413,15 @@ public class RichTextState internal constructor(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Remove stale paragraphs in reverse order so earlier indices stay valid.
+        if (paragraphIndicesToRemove.isNotEmpty()) {
+            for (idx in paragraphIndicesToRemove.sortedDescending()) {
+                if (idx in richParagraphList.indices) {
+                    richParagraphList.removeAt(idx)
                 }
             }
         }
@@ -2654,8 +2678,15 @@ public class RichTextState internal constructor(
                 // Save the old paragraph type
                 val minParagraphOldType = minRichSpan.paragraph.type
 
-                // Set the paragraph type to DefaultParagraph
-                minRichSpan.paragraph.type = DefaultParagraph()
+                // Guard: if a list paragraph was just inserted with its startText,
+                // the immediately-following remove is the Compose TextField resync
+                // (not a user backspace) — keep the list type instead of demoting.
+                if (justInsertedListParagraph && minParagraphOldType is ConfigurableListLevel) {
+                    justInsertedListParagraph = false
+                } else {
+                    // Set the paragraph type to DefaultParagraph
+                    minRichSpan.paragraph.type = DefaultParagraph()
+                }
 
                 // Check if it's a list and handle level appropriately
                 if (
@@ -3172,6 +3203,12 @@ public class RichTextState internal constructor(
                     end = tempTextFieldValue.selection.end + newParagraph.type.startText.length,
                 ),
             )
+
+            // Arm guard: if a list paragraph was just created with startText,
+            // the next remove event is a Compose resync, not a user backspace.
+            if (newParagraph.type is ConfigurableListLevel && newParagraph.type.startText.isNotEmpty()) {
+                justInsertedListParagraph = true
+            }
 
             // Add the new paragraph
             richParagraphList.add(paragraphIndex + 1, newParagraph)
