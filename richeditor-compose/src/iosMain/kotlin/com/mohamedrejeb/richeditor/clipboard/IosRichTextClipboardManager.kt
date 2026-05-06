@@ -44,7 +44,7 @@ internal class IosRichTextClipboardManager(
                 val html = NSString.create(data = htmlData, encoding = NSUTF8StringEncoding)
                     ?.toString()
                 if (html != null) {
-                    richTextState.pendingClipboardHtml = html
+                    richTextState.pendingClipboardHtml = stripSourceBackgroundColor(html)
                 }
             }
         } catch (e: Exception) {
@@ -91,6 +91,28 @@ internal class IosRichTextClipboardManager(
             e.printStackTrace()
         }
     }
+
+    /**
+     * iOS clipboard HTML carries the source document's background-color (typically white
+     * or transparent) on every span. Strip those so they don't render as white boxes
+     * behind the text inside the editor.
+     *
+     * Intentional highlight colors (yellow, blue, etc.) are left intact because only
+     * white, near-white, and transparent values are removed.
+     */
+    private fun stripSourceBackgroundColor(html: String): String =
+        html.replace(
+            Regex(
+                """background-color\s*:\s*""" +
+                """(?:white|transparent""" +
+                """|#[fF]{3,6}""" +
+                """|rgb\(\s*255\s*,\s*255\s*,\s*255\s*\)""" +
+                """|rgba\(\s*255\s*,\s*255\s*,\s*255\s*,\s*(?:0|1|1\.0|0\.0)\s*\)""" +
+                """)\s*;?""",
+                RegexOption.IGNORE_CASE,
+            ),
+            "",
+        )
 
     private companion object {
         const val HTML_UTI = "public.html"
