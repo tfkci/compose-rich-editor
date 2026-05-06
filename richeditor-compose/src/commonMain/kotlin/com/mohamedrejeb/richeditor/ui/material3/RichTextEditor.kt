@@ -282,6 +282,10 @@ private class TextFieldMeasurePolicy(
         measurables: List<Measurable>,
         constraints: Constraints
     ): MeasureResult {
+        // Guard against zero-width constraints (e.g. during IME animation transient layout passes).
+        // Compose Constraints cannot encode width=0 with a large height — bail out early.
+        if (constraints.maxWidth == 0) return layout(0, 0) {}
+
         val topPaddingValue = paddingValues.calculateTopPadding().roundToPx()
         val bottomPaddingValue = paddingValues.calculateBottomPadding().roundToPx()
 
