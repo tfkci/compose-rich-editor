@@ -2037,12 +2037,16 @@ public class RichTextState internal constructor(
                         newTextFieldValue
                     }
                     // Positional guard: only capitalize when the cursor is sitting
-                    // directly after a '\n', regardless of where the flag was armed.
-                    // This prevents wrong-position capitalization when the user taps
-                    // elsewhere after pressing Enter and then starts typing.
+                    // directly after a paragraph boundary, regardless of where the flag
+                    // was armed. updateAnnotatedString renders the inter-paragraph break
+                    // as a literal space (see RichTextState line ~2411 `append(' ')`), so
+                    // by the time the *next* keystroke arrives, cursor-2 is ' ', not '\n'.
+                    // Accept either character — both indicate the cursor is one position
+                    // past a paragraph break. This still rejects "tap-into-middle-of-word
+                    // and type" because cursor-2 there would be a regular letter.
                     shouldCapitalizeNextChar &&
                             justTyped != null && justTyped.isLetter() && justTyped.isLowerCase() &&
-                            newText.getOrNull(cursor - 2) == '\n' -> {
+                            newText.getOrNull(cursor - 2)?.let { it == '\n' || it == ' ' } == true -> {
                         shouldCapitalizeNextChar = false
                         val capitalized = newText.substring(0, cursor - 1) +
                             justTyped.uppercaseChar() +
