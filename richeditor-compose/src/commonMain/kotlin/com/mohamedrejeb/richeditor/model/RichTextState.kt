@@ -1935,6 +1935,18 @@ public class RichTextState internal constructor(
     private var forceCheckAllNewlines = false
 
     /**
+     * Tracks whether the next typed letter should be auto-capitalized.
+     * Armed when the user inserts a paragraph break (\n). Disarmed after
+     * the first character typed (capitalized if a letter, cleared otherwise)
+     * or on any deletion, so the user can retype lowercase if desired.
+     *
+     * Needed because the library renders paragraph separators as spaces to the
+     * IME, which means KeyboardCapitalization.Sentences never fires at paragraph
+     * boundaries even though visually a new line has started.
+     */
+    private var shouldCapitalizeNextChar = false
+
+    /**
      * Handles the new text field value.
      *
      * @param newTextFieldValue the new text field value.
@@ -1999,7 +2011,52 @@ public class RichTextState internal constructor(
         }
         pendingClipboardHtml = null
 
-        tempTextFieldValue = newTextFieldValue
+        // Auto-capitalize the first letter after a paragraph break (\n).
+        // The library replaces '\n' with a space in the annotated string so the IME
+        // never sees a sentence boundary — KeyboardCapitalization.Sentences therefore
+        // never fires at line breaks. We intercept here, before rich-text processing,
+        // so spans/formatting on the capitalized character are applied correctly.
+        val intercepted = run {
+            val collapsed = newTextFieldValue.selection.collapsed
+            val cursor = newTextFieldValue.selection.end
+            val newText = newTextFieldValue.text
+            val oldText = textFieldValue.text
+            if (collapsed && newText.length == oldText.length + 1) {
+                val justTyped = newText.getOrNull(cursor - 1)
+                when {
+                    justTyped == '\n' -> {
+                        shouldCapitalizeNextChar = true
+                        newTextFieldValue
+                    }
+                    // Positional guard: only capitalize when the cursor is sitting
+                    // directly after a '\n', regardless of where the flag was armed.
+                    // This prevents wrong-position capitalization when the user taps
+                    // elsewhere after pressing Enter and then starts typing.
+                    shouldCapitalizeNextChar &&
+                            justTyped != null && justTyped.isLetter() && justTyped.isLowerCase() &&
+                            newText.getOrNull(cursor - 2) == '\n' -> {
+                        shouldCapitalizeNextChar = false
+                        val capitalized = newText.substring(0, cursor - 1) +
+                            justTyped.uppercaseChar() +
+                            newText.substring(cursor)
+                        newTextFieldValue.copy(text = capitalized)
+                    }
+                    else -> {
+                        shouldCapitalizeNextChar = false
+                        newTextFieldValue
+                    }
+                }
+            } else {
+                // Paste, autocorrect, or any multi-char change — disarm.
+                // Pure selection moves (text unchanged) intentionally keep the flag
+                // so a cursor jump right after \n still gets the capitalize offer,
+                // but the positional guard above ensures it only fires at the \n boundary.
+                if (newText.length != oldText.length) shouldCapitalizeNextChar = false
+                newTextFieldValue
+            }
+        }
+
+        tempTextFieldValue = intercepted
 
         if (tempTextFieldValue.text.length > textFieldValue.text.length)
             handleAddingCharacters()
