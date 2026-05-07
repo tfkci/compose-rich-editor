@@ -26,7 +26,10 @@ import com.mohamedrejeb.richeditor.utils.diff
 internal object RichTextStateHtmlParser : RichTextStateParser<String> {
 
     @OptIn(ExperimentalRichTextApi::class)
-    override fun encode(input: String): RichTextState {
+    override fun encode(input: String): RichTextState = encode(input, config = null)
+
+    @OptIn(ExperimentalRichTextApi::class)
+    fun encode(input: String, config: RichTextConfig?): RichTextState {
         val openedTags = mutableListOf<Pair<String, Map<String, String>>>()
         val stringBuilder = StringBuilder()
         val richParagraphList = mutableListOf(RichParagraph())
@@ -139,7 +142,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                     isCurrentRichParagraphBlank
 
                 if (isFirstLiInBlankParagraph) {
-                    val paragraphType = encodeHtmlElementToRichParagraphType(lastOpenedTag!!, currentListLevel, orderedListCounters, orderedListStartValues)
+                    val paragraphType = encodeHtmlElementToRichParagraphType(lastOpenedTag!!, currentListLevel, orderedListCounters, orderedListStartValues, config)
                     currentRichParagraph.type = paragraphType
 
                     val cssParagraphStyle = CssEncoder.parseCssStyleMapToParagraphStyle(cssStyleMap, attributes)
@@ -158,7 +161,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                         if (isFirstLiInBlankParagraph)
                             currentRichParagraph.type
                         else if (name == "li" && lastOpenedTag != null)
-                            encodeHtmlElementToRichParagraphType(lastOpenedTag, currentListLevel, orderedListCounters, orderedListStartValues)
+                            encodeHtmlElementToRichParagraphType(lastOpenedTag, currentListLevel, orderedListCounters, orderedListStartValues, config)
                         else
                             DefaultParagraph()
 
@@ -737,9 +740,11 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
         listLevel: Int,
         orderedListCounters: MutableMap<Int, Int>,
         orderedListStartValues: MutableMap<Int, Int>,
+        config: RichTextConfig? = null,
     ): ParagraphType {
         return when (tagName) {
-            "ul" -> UnorderedList(initialLevel = listLevel)
+            "ul" -> if (config != null) UnorderedList(config = config, initialLevel = listLevel)
+                    else UnorderedList(initialLevel = listLevel)
             "ol" -> {
                 val number = orderedListCounters[listLevel] ?: 1
                 orderedListCounters[listLevel] = number + 1

@@ -139,7 +139,11 @@ internal fun AnnotatedString.Builder.append(
             return@withStyle
         }
 
-        val newText = text.substring(index, index + richSpan.text.length)
+        // Guard against stale span lengths that exceed the new text (e.g. after a physical
+        // keyboard deletion where the rich spans haven't been reconciled yet).
+        val safeStart = index.coerceAtMost(text.length)
+        val safeEnd = (index + richSpan.text.length).coerceAtMost(text.length)
+        val newText = text.substring(safeStart, safeEnd)
 
         richSpan.text = newText
         richSpan.textRange = TextRange(index, index + richSpan.text.length)

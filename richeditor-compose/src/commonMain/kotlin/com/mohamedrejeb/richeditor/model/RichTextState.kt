@@ -2684,38 +2684,71 @@ public class RichTextState internal constructor(
                 minRichSpan.paragraph.children.clear()
                 richParagraphList.remove(minRichSpan.paragraph)
             } else {
-                handleRemoveMinParagraphStartText(
-                    removeIndex = minRemoveIndex,
-                    paragraphStartTextLength = minParagraphStartTextLength,
-                    paragraphFirstChildMinIndex = minParagraphFirstChildMinIndex,
-                )
-
-                // Save the old paragraph type
                 val minParagraphOldType = minRichSpan.paragraph.type
 
-                // Guard: if a list paragraph was just inserted with its startText,
-                // the immediately-following remove is the Compose TextField resync
-                // (not a user backspace) — keep the list type instead of demoting.
-                if (justInsertedListParagraph && minParagraphOldType is ConfigurableListLevel) {
-                    justInsertedListParagraph = false
+                // Detect Compose TextField resync: after checkForParagraphs inserts a list
+                // startText (e.g. "• ") into tempTextFieldValue, some IMEs (Samsung, others)
+                // send one or more removal callbacks that remove exactly that startText from an
+                // otherwise-empty new paragraph. These are not user actions — they are the IME
+                // reconciling its internal buffer with our programmatic insertion.
+                //
+                // Distinguishing feature: the removal range covers EXACTLY the startText of a
+                // freshly-created, still-empty list paragraph, starting at the startText position.
+                // A real user Backspace removes at most 1 char at a time from the cursor and would
+                // NOT align precisely with both the length and start offset of the full startText.
+                //
+                // When we detect a resync we: (a) do NOT demote the paragraph type, and (b) restore
+                // the startText chars into tempTextFieldValue so that updateAnnotatedString keeps
+                // textFieldValue.text stable — this causes the IME to converge and stop resyncing.
+                // We intentionally do NOT clear justInsertedListParagraph here so that repeated
+                // resyncs from persistent IMEs are all handled the same way; the flag is cleared by
+                // the character-addition path (line 2087) once the user types in the new bullet.
+                val isComposeResync =
+                    justInsertedListParagraph &&
+                    minParagraphOldType is ConfigurableListLevel &&
+                    minRichSpan.paragraph.isEmpty() &&
+                    removedCharsCount == minParagraphStartTextLength &&
+                    minRemoveIndex == minParagraphFirstChildMinIndex - minParagraphStartTextLength
+
+                if (isComposeResync) {
+                    val startText = minParagraphOldType.startText
+                    if (startText.isNotEmpty()) {
+                        val insertAt = minRemoveIndex.coerceIn(0, tempTextFieldValue.text.length)
+                        tempTextFieldValue = tempTextFieldValue.copy(
+                            text = tempTextFieldValue.text.substring(0, insertAt) +
+                                startText +
+                                tempTextFieldValue.text.substring(insertAt),
+                            selection = TextRange(
+                                (tempTextFieldValue.selection.start + startText.length)
+                                    .coerceAtLeast(0),
+                            ),
+                        )
+                    }
                 } else {
+                    justInsertedListParagraph = false
+                    handleRemoveMinParagraphStartText(
+                        removeIndex = minRemoveIndex,
+                        paragraphStartTextLength = minParagraphStartTextLength,
+                        paragraphFirstChildMinIndex = minParagraphFirstChildMinIndex,
+                    )
+
                     // Set the paragraph type to DefaultParagraph
                     minRichSpan.paragraph.type = DefaultParagraph()
-                }
 
-                // Check if it's a list and handle level appropriately
-                if (
-                    maxRemoveIndex - minRemoveIndex == 1 &&
-                    minParagraphOldType is ConfigurableListLevel &&
-                    minParagraphOldType.level > 1
-                ) {
-                    // Decrease level instead of exiting list
-                    minParagraphOldType.level -= 1
-                    tempTextFieldValue = updateParagraphType(
-                        paragraph = minRichSpan.paragraph,
-                        newType = minParagraphOldType,
-                        textFieldValue = tempTextFieldValue,
-                    )
+                    // Check if it's a list and handle level appropriately
+                    if (
+                        maxRemoveIndex - minRemoveIndex == 1 &&
+                        minParagraphOldType is ConfigurableListLevel &&
+                        minParagraphOldType.level > 1
+                    ) {
+                        // Decrease level instead of exiting list
+                        minParagraphOldType.level -= 1
+                        tempTextFieldValue = updateParagraphType(
+                            paragraph = minRichSpan.paragraph,
+                            newType = minParagraphOldType,
+                            textFieldValue = tempTextFieldValue,
+                        )
+                    }
                 }
             }
         }
@@ -3157,6 +3190,14 @@ public class RichTextState internal constructor(
             // Make sure the index is not less than the minimum text range of the rich span style
             // This is to make sure that the index is not in paragraph custom start text
             val sliceIndex = max(index, richSpan.textRange.min)
+
+            // Guard: a prior loop iteration may have inserted startText into tempTextFieldValue,
+            // leaving span textRanges stale (they will be reconciled by updateAnnotatedString).
+            // If sliceIndex points past the current text end, skip rather than crash on substring.
+            if (sliceIndex >= tempTextFieldValue.text.length) {
+                index--
+                continue
+            }
 
             // Create a new paragraph style
             val newParagraph = richSpan.paragraph.slice(
@@ -4681,7 +4722,7 @@ public class RichTextState internal constructor(
      */
     public fun setHtml(html: String): RichTextState {
         history.onProgrammaticReplace()
-        val richParagraphList = RichTextStateHtmlParser.encode(html).richParagraphList
+        val richParagraphList = RichTextStateHtmlParser.encode(html, config).richParagraphList
         updateRichParagraphList(richParagraphList)
         return this
     }

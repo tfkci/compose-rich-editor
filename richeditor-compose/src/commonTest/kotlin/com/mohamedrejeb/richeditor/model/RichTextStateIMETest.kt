@@ -923,4 +923,88 @@ class RichTextStateIMETest {
         state.assertInvariants("after same-length replacement")
         assertTrue(state.annotatedString.text.contains("World"))
     }
+
+    // ========================================================================
+    // Double-resync regression: Samsung and some other IMEs send the prefix-
+    // removal event TWICE after an Enter. The first fires the
+    // justInsertedListParagraph guard; the second must not demote the type.
+    // ========================================================================
+
+    @Test
+    fun testDoubleResyncAfterEnter_unorderedList() {
+        val state = RichTextState()
+        state.setHtml("<ul><li>item1</li><li>item2</li></ul>")
+
+        val textBeforeEnter = state.annotatedString.text
+        state.selection = TextRange(textBeforeEnter.length)
+
+        // User presses Enter at end of item2
+        state.onTextFieldValueChange(
+            TextFieldValue(
+                text = textBeforeEnter + "\n",
+                selection = TextRange(textBeforeEnter.length + 1),
+            )
+        )
+        assertEquals(3, state.richParagraphList.size, "Enter should create third bullet")
+        assertIs<UnorderedList>(state.richParagraphList[2].type)
+
+        val textAfterEnter = state.annotatedString.text // "• item1 • item2 • " (includes new "• ")
+
+        // First resync: IME removes the "• " we added (doesn't know about it)
+        val firstResync = textAfterEnter.dropLast(state.richParagraphList[2].type.startText.length)
+        state.onTextFieldValueChange(
+            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+        )
+        state.assertInvariants("after first resync")
+        assertEquals(3, state.richParagraphList.size, "First resync must not delete bullet")
+        assertIs<UnorderedList>(state.richParagraphList[2].type, "First resync must not demote type")
+
+        // Second resync: Samsung-style IME sends the same removal again
+        state.onTextFieldValueChange(
+            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+        )
+        state.assertInvariants("after second resync")
+        assertEquals(3, state.richParagraphList.size, "Second resync must not delete bullet")
+        assertIs<UnorderedList>(state.richParagraphList[2].type, "Second resync must not demote type")
+    }
+
+    @Test
+    fun testDoubleResyncAfterEnter_orderedList() {
+        val state = RichTextState()
+        state.setHtml("<ol><li>brot</li></ol>")
+
+        val textBeforeEnter = state.annotatedString.text
+        state.selection = TextRange(textBeforeEnter.length)
+
+        // Enter
+        state.onTextFieldValueChange(
+            TextFieldValue(
+                text = textBeforeEnter + "\n",
+                selection = TextRange(textBeforeEnter.length + 1),
+            )
+        )
+        assertEquals(2, state.richParagraphList.size)
+        assertIs<OrderedList>(state.richParagraphList[1].type)
+
+        val textAfterEnter = state.annotatedString.text // "1. brot 2. "
+
+        // First prefix-removal resync (no \n — pure removal path)
+        val firstResync = textAfterEnter.dropLast(
+            state.richParagraphList[1].type.startText.length
+        )
+        state.onTextFieldValueChange(
+            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+        )
+        state.assertInvariants("after first no-newline resync")
+        assertEquals(2, state.richParagraphList.size, "First resync must not delete paragraph")
+        assertIs<OrderedList>(state.richParagraphList[1].type)
+
+        // Second prefix-removal resync
+        state.onTextFieldValueChange(
+            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+        )
+        state.assertInvariants("after second no-newline resync")
+        assertEquals(2, state.richParagraphList.size, "Second resync must not delete paragraph")
+        assertIs<OrderedList>(state.richParagraphList[1].type, "Second resync must not demote to DefaultParagraph")
+    }
 }
