@@ -1,4 +1,4 @@
 allprojects {
     group = "com.mohamedrejeb.richeditor"
-    version = System.getenv("VERSION") ?: "ertech-1.0.0-rc24"
+    version = System.getenv("VERSION") ?: "ertech-1.0.0-rc25"
 }
