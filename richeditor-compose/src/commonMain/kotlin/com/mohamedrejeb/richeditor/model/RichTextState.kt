@@ -1329,6 +1329,35 @@ public class RichTextState internal constructor(
         }
     }
 
+    /**
+     * Updates the bullet style of all selected unordered-list paragraphs without
+     * toggling the list on or off. No-ops on paragraphs that are not unordered lists.
+     *
+     * Use this instead of setting [RichTextConfig.unorderedListStyleType] when the
+     * user changes the bullet style of an already-active list — the config approach
+     * would propagate the style to every list paragraph in the state (via getStyle),
+     * whereas this method targets only the selected paragraphs.
+     */
+    public fun updateUnorderedListStyle(styleType: UnorderedListStyleType): Unit = recordHistory(CommitTrigger.Structural) {
+        val paragraphs = getRichParagraphListByTextRange(selection)
+        if (paragraphs.isEmpty()) return@recordHistory
+
+        var newTextFieldValue = textFieldValue
+        paragraphs.fastForEach { paragraph ->
+            val type = paragraph.type
+            if (type is UnorderedList) {
+                val newType = type.copyWithStyleType(styleType)
+                newTextFieldValue = updateParagraphType(
+                    paragraph = paragraph,
+                    newType = newType,
+                    textFieldValue = newTextFieldValue,
+                )
+            }
+        }
+
+        updateTextFieldValue(newTextFieldValue = newTextFieldValue)
+    }
+
     public fun toggleOrderedList(): Unit = recordHistory(CommitTrigger.Structural) {
         val paragraphs = getRichParagraphListByTextRange(selection)
         if (paragraphs.isEmpty())

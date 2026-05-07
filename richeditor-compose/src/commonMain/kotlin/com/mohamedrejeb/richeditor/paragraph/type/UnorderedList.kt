@@ -77,9 +77,9 @@ internal class UnorderedList private constructor(
             indent = config.unorderedListIndent
         }
 
-        if (config.unorderedListStyleType != styleType) {
-            styleType = config.unorderedListStyleType
-        }
+        // Don't override styleType from config — each paragraph keeps its own bullet style.
+        // styleType is set at construction time via constructor(config, initialLevel) or
+        // updated explicitly via RichTextState.updateUnorderedListStyle().
 
         if (config.listPrefixAlignment != prefixAlignment) {
             prefixAlignment = config.listPrefixAlignment
@@ -87,6 +87,15 @@ internal class UnorderedList private constructor(
 
         return style
     }
+
+    internal fun copyWithStyleType(newStyleType: UnorderedListStyleType): UnorderedList =
+        UnorderedList(
+            initialIndent = indent,
+            startTextWidth = startTextWidth,
+            initialLevel = level,
+            initialStyleType = newStyleType,
+            initialPrefixAlignment = prefixAlignment,
+        )
 
     private fun getNewParagraphStyle(): ParagraphStyle {
         val base = (indent * level).toFloat()
