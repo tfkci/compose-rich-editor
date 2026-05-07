@@ -77,8 +77,9 @@ internal class UnorderedList private constructor(
             indent = config.unorderedListIndent
         }
 
-        // Don't override styleType from config — each paragraph keeps its own bullet style.
-        // styleType is set at creation time via constructor(config, initialLevel).
+        if (config.unorderedListStyleType != styleType) {
+            styleType = config.unorderedListStyleType
+        }
 
         if (config.listPrefixAlignment != prefixAlignment) {
             prefixAlignment = config.listPrefixAlignment
