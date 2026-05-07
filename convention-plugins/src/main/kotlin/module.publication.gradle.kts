@@ -4,7 +4,9 @@ plugins {
 
 mavenPublishing {
     publishToMavenCentral()
-    signAllPublications()
+    if (providers.gradleProperty("skipSigning").orNull != "true") {
+        signAllPublications()
+    }
 
     coordinates(group.toString(), project.name, version.toString())
 
