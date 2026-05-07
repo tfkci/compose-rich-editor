@@ -1,5 +1,21 @@
 plugins {
     id("com.vanniktech.maven.publish")
+    `maven-publish`
+}
+
+afterEvaluate {
+    publishing {
+        repositories {
+            maven {
+                name = "GitHubPackages"
+                url = uri("https://maven.pkg.github.com/tfkci/compose-rich-editor")
+                credentials {
+                    username = System.getenv("GPR_USER") ?: (project.findProperty("gpr.user") as? String).orEmpty()
+                    password = System.getenv("GPR_TOKEN") ?: (project.findProperty("gpr.key") as? String).orEmpty()
+                }
+            }
+        }
+    }
 }
 
 mavenPublishing {
