@@ -57,7 +57,7 @@ internal class UnorderedList private constructor(
             startRichSpan = getNewStartRichSpan()
         }
 
-    private var styleType = initialStyleType
+    internal var styleType = initialStyleType
         set(value) {
             field = value
             startRichSpan = getNewStartRichSpan()

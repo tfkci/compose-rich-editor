@@ -13,6 +13,7 @@ import com.mohamedrejeb.richeditor.paragraph.type.DefaultParagraph
 import com.mohamedrejeb.richeditor.paragraph.type.OrderedList
 import com.mohamedrejeb.richeditor.paragraph.type.ParagraphType
 import com.mohamedrejeb.richeditor.paragraph.type.UnorderedList
+import com.mohamedrejeb.richeditor.paragraph.type.UnorderedListStyleType
 import com.mohamedrejeb.richeditor.parser.RichTextStateParser
 import com.mohamedrejeb.richeditor.parser.utils.*
 import com.mohamedrejeb.richeditor.utils.InlineContentPlaceholder
@@ -87,6 +88,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
             }
             .onOpenTag { name, attributes, _ ->
                 val lastOpenedTag = openedTags.lastOrNull()?.first
+                val lastOpenedTagAttributes = openedTags.lastOrNull()?.second ?: emptyMap()
 
                 openedTags.add(name to attributes)
 
@@ -142,7 +144,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                     isCurrentRichParagraphBlank
 
                 if (isFirstLiInBlankParagraph) {
-                    val paragraphType = encodeHtmlElementToRichParagraphType(lastOpenedTag!!, currentListLevel, orderedListCounters, orderedListStartValues, config)
+                    val paragraphType = encodeHtmlElementToRichParagraphType(lastOpenedTag!!, currentListLevel, orderedListCounters, orderedListStartValues, config, lastOpenedTagAttributes)
                     currentRichParagraph.type = paragraphType
 
                     val cssParagraphStyle = CssEncoder.parseCssStyleMapToParagraphStyle(cssStyleMap, attributes)
@@ -161,7 +163,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                         if (isFirstLiInBlankParagraph)
                             currentRichParagraph.type
                         else if (name == "li" && lastOpenedTag != null)
-                            encodeHtmlElementToRichParagraphType(lastOpenedTag, currentListLevel, orderedListCounters, orderedListStartValues, config)
+                            encodeHtmlElementToRichParagraphType(lastOpenedTag, currentListLevel, orderedListCounters, orderedListStartValues, config, lastOpenedTagAttributes)
                         else
                             DefaultParagraph()
 
@@ -473,10 +475,16 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
             }
 
             if (isOpenParagraphGroup()) {
-                if (paragraphGroupTagName == "ol" && richParagraphType is OrderedList && richParagraphType.startFrom > 1) {
-                    builder.append("<ol start=\"${richParagraphType.startFrom}\">")
-                } else {
-                    builder.append("<$paragraphGroupTagName>")
+                when {
+                    paragraphGroupTagName == "ol" && richParagraphType is OrderedList && richParagraphType.startFrom > 1 ->
+                        builder.append("<ol start=\"${richParagraphType.startFrom}\">")
+                    paragraphGroupTagName == "ul" && richParagraphType is UnorderedList &&
+                            richParagraphType.styleType != UnorderedListStyleType.Disc -> {
+                        val encoded = richParagraphType.styleType.prefixes
+                            .joinToString(",") { escapeHtmlAttribute(it) }
+                        builder.append("<ul data-bullet=\"$encoded\">")
+                    }
+                    else -> builder.append("<$paragraphGroupTagName>")
                 }
                 openedListTagNames.add(paragraphGroupTagName)
             }
@@ -741,10 +749,21 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
         orderedListCounters: MutableMap<Int, Int>,
         orderedListStartValues: MutableMap<Int, Int>,
         config: RichTextConfig? = null,
+        listAttributes: Map<String, String> = emptyMap(),
     ): ParagraphType {
         return when (tagName) {
-            "ul" -> if (config != null) UnorderedList(config = config, initialLevel = listLevel)
-                    else UnorderedList(initialLevel = listLevel)
+            "ul" -> {
+                val dataBullet = listAttributes["data-bullet"]
+                when {
+                    dataBullet != null -> {
+                        val prefixes = dataBullet.split(",")
+                        UnorderedList(initialLevel = listLevel)
+                            .copyWithStyleType(UnorderedListStyleType.from(prefixes))
+                    }
+                    config != null -> UnorderedList(config = config, initialLevel = listLevel)
+                    else -> UnorderedList(initialLevel = listLevel)
+                }
+            }
             "ol" -> {
                 val number = orderedListCounters[listLevel] ?: 1
                 orderedListCounters[listLevel] = number + 1
