@@ -550,11 +550,36 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                     }
                 }
 
-                // Check if the next paragraph is also a <br> continuation - if so, don't close yet
-                val nextParagraph = richTextState.richParagraphList.getOrNull(index + 1)
-                val nextIsLineBreakContinuation = nextParagraph != null &&
-                    nextParagraph.isFromLineBreak &&
-                    !nextParagraph.isEmpty()
+                // Decide whether to close this paragraph tag now, or keep it open
+                // because a following non-empty <br> continuation paragraph will emit
+                // its content inline (<br> + spans) relying on THIS tag staying open.
+                //
+                // For flow text, every empty paragraph in between is emitted as a bare
+                // <br> INSIDE this open tag, so we must look past ALL of them (whether or
+                // not they are flagged isFromLineBreak — an explicit "</p><br>" leaves an
+                // empty non-line-break paragraph). Closing the tag too early pushes the
+                // inline <br> content after </p>, producing malformed, non-idempotent
+                // HTML (e.g. "<p>First</p><br><br>Second</p>") whose re-parse accumulates
+                // an extra <br> on every save/reload cycle. List items keep the original
+                // immediate-next check so list grouping is untouched.
+                val nextIsLineBreakContinuation: Boolean =
+                    if (paragraphTagName == "li") {
+                        val nextParagraph = richTextState.richParagraphList.getOrNull(index + 1)
+                        nextParagraph != null && nextParagraph.isFromLineBreak && !nextParagraph.isEmpty()
+                    } else {
+                        var lookaheadIndex = index + 1
+                        var result = false
+                        while (true) {
+                            val candidate = richTextState.richParagraphList.getOrNull(lookaheadIndex) ?: break
+                            if (candidate.isEmpty()) {
+                                lookaheadIndex++
+                                continue
+                            }
+                            result = candidate.isFromLineBreak
+                            break
+                        }
+                        result
+                    }
 
                 if (!nextIsLineBreakContinuation) {
                     builder.append("</$paragraphTagName>")
