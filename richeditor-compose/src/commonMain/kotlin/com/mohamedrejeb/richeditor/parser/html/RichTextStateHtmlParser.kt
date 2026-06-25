@@ -479,7 +479,7 @@ internal object RichTextStateHtmlParser : RichTextStateParser<String> {
                     paragraphGroupTagName == "ol" && richParagraphType is OrderedList && richParagraphType.startFrom > 1 ->
                         builder.append("<ol start=\"${richParagraphType.startFrom}\">")
                     paragraphGroupTagName == "ul" && richParagraphType is UnorderedList &&
-                            richParagraphType.styleType != UnorderedListStyleType.Disc -> {
+                            richParagraphType.styleType != DefaultUnorderedListStyleType -> {
                         val encoded = richParagraphType.styleType.prefixes
                             .joinToString(",") { escapeHtmlAttribute(it) }
                         builder.append("<ul data-bullet=\"$encoded\">")
