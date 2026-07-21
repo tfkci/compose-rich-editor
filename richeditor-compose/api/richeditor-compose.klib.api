@@ -1,5 +1,5 @@
 // Klib ABI Dump
-// Targets: [iosArm64, iosSimulatorArm64, iosX64, js, wasmJs]
+// Targets: [iosArm64, iosSimulatorArm64, js, wasmJs]
 // Rendering settings:
 // - Signature version: 2
 // - Show manifest properties: true
@@ -302,6 +302,9 @@ final class com.mohamedrejeb.richeditor.model/ImageData { // com.mohamedrejeb.ri
 }
 
 final class com.mohamedrejeb.richeditor.model/RichTextConfig { // com.mohamedrejeb.richeditor.model/RichTextConfig|null[0]
+    final var autoCapitalizeAfterParagraphBreak // com.mohamedrejeb.richeditor.model/RichTextConfig.autoCapitalizeAfterParagraphBreak|{}autoCapitalizeAfterParagraphBreak[0]
+        final fun <get-autoCapitalizeAfterParagraphBreak>(): kotlin/Boolean // com.mohamedrejeb.richeditor.model/RichTextConfig.autoCapitalizeAfterParagraphBreak.<get-autoCapitalizeAfterParagraphBreak>|<get-autoCapitalizeAfterParagraphBreak>(){}[0]
+        final fun <set-autoCapitalizeAfterParagraphBreak>(kotlin/Boolean) // com.mohamedrejeb.richeditor.model/RichTextConfig.autoCapitalizeAfterParagraphBreak.<set-autoCapitalizeAfterParagraphBreak>|<set-autoCapitalizeAfterParagraphBreak>(kotlin.Boolean){}[0]
     final var codeSpanBackgroundColor // com.mohamedrejeb.richeditor.model/RichTextConfig.codeSpanBackgroundColor|{}codeSpanBackgroundColor[0]
         final fun <get-codeSpanBackgroundColor>(): androidx.compose.ui.graphics/Color // com.mohamedrejeb.richeditor.model/RichTextConfig.codeSpanBackgroundColor.<get-codeSpanBackgroundColor>|<get-codeSpanBackgroundColor>(){}[0]
         final fun <set-codeSpanBackgroundColor>(androidx.compose.ui.graphics/Color) // com.mohamedrejeb.richeditor.model/RichTextConfig.codeSpanBackgroundColor.<set-codeSpanBackgroundColor>|<set-codeSpanBackgroundColor>(androidx.compose.ui.graphics.Color){}[0]
@@ -463,6 +466,7 @@ final class com.mohamedrejeb.richeditor.model/RichTextState { // com.mohamedreje
     final fun toggleUnorderedList() // com.mohamedrejeb.richeditor.model/RichTextState.toggleUnorderedList|toggleUnorderedList(){}[0]
     final fun unregisterTrigger(kotlin/String) // com.mohamedrejeb.richeditor.model/RichTextState.unregisterTrigger|unregisterTrigger(kotlin.String){}[0]
     final fun updateLink(kotlin/String) // com.mohamedrejeb.richeditor.model/RichTextState.updateLink|updateLink(kotlin.String){}[0]
+    final fun updateUnorderedListStyle(com.mohamedrejeb.richeditor.paragraph.type/UnorderedListStyleType) // com.mohamedrejeb.richeditor.model/RichTextState.updateUnorderedListStyle|updateUnorderedListStyle(com.mohamedrejeb.richeditor.paragraph.type.UnorderedListStyleType){}[0]
     final inline fun <#A1: reified com.mohamedrejeb.richeditor.model/RichSpanStyle> isRichSpan(): kotlin/Boolean // com.mohamedrejeb.richeditor.model/RichTextState.isRichSpan|isRichSpan(){0§<com.mohamedrejeb.richeditor.model.RichSpanStyle>}[0]
 
     final object Companion { // com.mohamedrejeb.richeditor.model/RichTextState.Companion|null[0]

@@ -153,19 +153,20 @@ internal object RichTextStateMarkdownParser : RichTextStateParser<String> {
                             (currentRichParagraphType as ConfigurableListLevel).level = currentListLevel
                         }
 
-                        // Preserve the author's actual ordered-list number via startFrom so it
-                        // survives renumbering even when a non-list paragraph splits the list.
-                        val orderedNumber = node
-                            .findChildOfType(MarkdownTokenTypes.LIST_NUMBER)
+                        // Interrupted lists parse as separate list nodes; seed the item
+                        // with the literal source number so the author's numbering
+                        // survives renumbering (#734).
+                        val literalNumber = node.children
+                            .firstOrNull { it.type == MarkdownTokenTypes.LIST_NUMBER }
                             ?.getTextInNode(correctedMarkdown)
-                            ?.toString()?.trim()
-                            ?.let { it.substring(0, it.length - 1).trimStart('0').toIntOrNull() }
-
-                        if (orderedNumber != null && currentRichParagraphType is OrderedList) {
+                            ?.toString()
+                            ?.takeWhile { char -> char.isDigit() }
+                            ?.toIntOrNull()
+                        if (literalNumber != null) {
                             currentRichParagraphType = OrderedList(
-                                number = orderedNumber,
+                                number = literalNumber,
                                 initialLevel = currentListLevel,
-                                startFrom = orderedNumber,
+                                startFrom = literalNumber,
                             )
                         }
 

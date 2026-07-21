@@ -43,6 +43,15 @@ public class RichTextConfig internal constructor(
         }
 
     /**
+     * Auto-capitalize the first letter typed after a paragraph break.
+     *
+     * The editor renders paragraph separators as spaces to the IME, so
+     * KeyboardCapitalization.Sentences never fires at line breaks; this
+     * re-implements that behavior inside the editor.
+     */
+    public var autoCapitalizeAfterParagraphBreak: Boolean = true
+
+    /**
      * The indent for ordered lists.
      */
     public var orderedListIndent: Int = DefaultListIndent

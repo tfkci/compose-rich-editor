@@ -139,6 +139,7 @@ public final class com/mohamedrejeb/richeditor/model/RichSpanStyle$Token : com/m
 
 public final class com/mohamedrejeb/richeditor/model/RichTextConfig {
 	public static final field $stable I
+	public final fun getAutoCapitalizeAfterParagraphBreak ()Z
 	public final fun getCodeSpanBackgroundColor-0d7_KjU ()J
 	public final fun getCodeSpanColor-0d7_KjU ()J
 	public final fun getCodeSpanStrokeColor-0d7_KjU ()J
@@ -153,6 +154,7 @@ public final class com/mohamedrejeb/richeditor/model/RichTextConfig {
 	public final fun getPreserveStyleOnEmptyLine ()Z
 	public final fun getUnorderedListIndent ()I
 	public final fun getUnorderedListStyleType ()Lcom/mohamedrejeb/richeditor/paragraph/type/UnorderedListStyleType;
+	public final fun setAutoCapitalizeAfterParagraphBreak (Z)V
 	public final fun setCodeSpanBackgroundColor-8_81llA (J)V
 	public final fun setCodeSpanColor-8_81llA (J)V
 	public final fun setCodeSpanStrokeColor-8_81llA (J)V
@@ -267,6 +269,7 @@ public final class com/mohamedrejeb/richeditor/model/RichTextState {
 	public final fun toggleUnorderedList ()V
 	public final fun unregisterTrigger (Ljava/lang/String;)V
 	public final fun updateLink (Ljava/lang/String;)V
+	public final fun updateUnorderedListStyle (Lcom/mohamedrejeb/richeditor/paragraph/type/UnorderedListStyleType;)V
 }
 
 public final class com/mohamedrejeb/richeditor/model/RichTextState$Companion {
@@ -468,8 +471,8 @@ public final class com/mohamedrejeb/richeditor/ui/BasicRichTextKt {
 public final class com/mohamedrejeb/richeditor/ui/ComposableSingletons$BasicRichTextEditorKt {
 	public static final field INSTANCE Lcom/mohamedrejeb/richeditor/ui/ComposableSingletons$BasicRichTextEditorKt;
 	public fun <init> ()V
-	public final fun getLambda$58895838$richeditor_compose ()Lkotlin/jvm/functions/Function3;
-	public final fun getLambda$626927937$richeditor_compose ()Lkotlin/jvm/functions/Function3;
+	public final fun getLambda$58895838$com_mohamedrejeb_richeditor_richeditor_compose ()Lkotlin/jvm/functions/Function3;
+	public final fun getLambda$626927937$com_mohamedrejeb_richeditor_richeditor_compose ()Lkotlin/jvm/functions/Function3;
 }
 
 public final class com/mohamedrejeb/richeditor/ui/ExpandableBasicRichTextKt {

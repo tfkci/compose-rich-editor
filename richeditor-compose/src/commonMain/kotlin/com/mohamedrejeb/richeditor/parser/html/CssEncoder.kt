@@ -9,6 +9,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.*
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.TextUnitType
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
@@ -43,9 +44,7 @@ internal object CssEncoder {
             fontStyle = cssStyleMap["font-style"]?.let { parseCssFontStyle(it) },
             letterSpacing = cssStyleMap["letter-spacing"]?.let { parseCssSize(it)?.sp } ?: TextUnit.Unspecified,
             baselineShift = cssStyleMap["baseline-shift"]?.let { parseCssBaselineShift(it) },
-            background = cssStyleMap["background"]?.let { parseCssColor(it) }
-                ?: cssStyleMap["background-color"]?.let { parseCssColor(it) }
-                ?: Color.Unspecified,
+            background = parseCssBackgroundColor(cssStyleMap) ?: Color.Unspecified,
             textDecoration = cssStyleMap["text-decoration"]?.let { parseCssTextDecoration(it) },
             shadow = cssStyleMap["text-shadow"]?.let { parseCssTextShadow(it) },
         )
@@ -102,20 +101,11 @@ internal object CssEncoder {
                 )
             }
         }
-        cssStyleMap["background"]?.let{ string ->
-            parseCssColor(string)?.let {
-                spanStyleSet.add(
-                    SpanStyle(background = it)
-                )
-            }
+        parseCssBackgroundColor(cssStyleMap)?.let {
+            spanStyleSet.add(
+                SpanStyle(background = it)
+            )
         }
-            ?: cssStyleMap["background-color"]?.let{ string ->
-                parseCssColor(string)?.let {
-                    spanStyleSet.add(
-                        SpanStyle(background = it)
-                    )
-                }
-            }
         cssStyleMap["text-decoration"]?.let{ string ->
             parseCssTextDecoration(string)?.let {
                 spanStyleSet.add(
@@ -159,6 +149,22 @@ internal object CssEncoder {
      * @param cssColor the CSS color string to parse.
      * @return the parsed [Color] or `null` if the color string could not be parsed.
      */
+    /**
+     * Resolves the background of a css style map, treating white and transparent as
+     * "no background": those are the source document's page background carried into
+     * the clipboard HTML, and importing them paints opaque boxes behind the text
+     * (see PR #723). Explicit non-neutral highlights are kept.
+     */
+    internal fun parseCssBackgroundColor(cssStyleMap: Map<String, String>): Color? {
+        val color = cssStyleMap["background"]?.let { parseCssColor(it) }
+            ?: cssStyleMap["background-color"]?.let { parseCssColor(it) }
+            ?: return null
+        return color.takeUnless { it.isNeutralBackground() }
+    }
+
+    private fun Color.isNeutralBackground(): Boolean =
+        alpha == 0f || (red == 1f && green == 1f && blue == 1f)
+
     internal fun parseCssColor(cssColor: String): Color? {
         val rgbRegex = Regex("""rgb\((\d+), (\d+), (\d+)\)""")
         val rgbaRegex = Regex("""rgba\((\d+), (\d+), (\d+), ([\d.]+)\)""")
@@ -427,8 +433,12 @@ internal object CssEncoder {
         if (cssTextIndent.isBlank()) return null
 
         val textUnit = parseCssTextSize(cssTextIndent)
-        return if (textUnit.isSpecified) TextIndent(textUnit, textUnit)
-            else null
+        if (!textUnit.isSpecified) return null
+
+        val spUnit =
+            if (textUnit.type == TextUnitType.Em) (textUnit.value * 16).sp
+            else textUnit
+        return TextIndent(spUnit, spUnit)
     }
 
     /**

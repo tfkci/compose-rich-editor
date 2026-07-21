@@ -3,6 +3,7 @@ package com.mohamedrejeb.richeditor.model
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.mohamedrejeb.richeditor.annotation.ExperimentalRichTextApi
+import com.mohamedrejeb.richeditor.paragraph.type.DefaultParagraph
 import com.mohamedrejeb.richeditor.paragraph.type.OrderedList
 import com.mohamedrejeb.richeditor.paragraph.type.ParagraphType.Companion.startText
 import com.mohamedrejeb.richeditor.paragraph.type.UnorderedList
@@ -924,21 +925,26 @@ class RichTextStateIMETest {
         assertTrue(state.annotatedString.text.contains("World"))
     }
 
-    // ========================================================================
-    // Double-resync regression: Samsung and some other IMEs send the prefix-
-    // removal event TWICE after an Enter. The first fires the
-    // justInsertedListParagraph guard; the second must not demote the type.
-    // ========================================================================
+    // -------------------------------------------------------------------------
+    // IME startText echo tests
+    //
+    // Some IMEs (Samsung and others) respond to a programmatic startText insertion
+    // (the bullet/number prefix added after Enter) by echoing it back as a removal
+    // of exactly those characters, possibly more than once. The echo used to be
+    // treated as a user Backspace and demoted the new item to DefaultParagraph,
+    // stripping the bullet. It is absorbed only while the selection is collapsed:
+    // a real user deletion of the prefix arrives after a range selection and must
+    // still demote the item (see the last test).
+    // -------------------------------------------------------------------------
 
     @Test
-    fun testDoubleResyncAfterEnter_unorderedList() {
+    fun testSingleStartTextEchoAfterEnter_unorderedList() {
         val state = RichTextState()
         state.setHtml("<ul><li>item1</li><li>item2</li></ul>")
-
         val textBeforeEnter = state.annotatedString.text
         state.selection = TextRange(textBeforeEnter.length)
 
-        // User presses Enter at end of item2
+        // Simulate Enter
         state.onTextFieldValueChange(
             TextFieldValue(
                 text = textBeforeEnter + "\n",
@@ -948,63 +954,124 @@ class RichTextStateIMETest {
         assertEquals(3, state.richParagraphList.size, "Enter should create third bullet")
         assertIs<UnorderedList>(state.richParagraphList[2].type)
 
-        val textAfterEnter = state.annotatedString.text // "• item1 • item2 • " (includes new "• ")
-
-        // First resync: IME removes the "• " we added (doesn't know about it)
-        val firstResync = textAfterEnter.dropLast(state.richParagraphList[2].type.startText.length)
+        // IME echo: removes exactly the startText of the new empty paragraph
+        val textAfterEnter = state.annotatedString.text
+        val startTextLen = state.richParagraphList[2].type.startText.length
+        val afterEcho = textAfterEnter.dropLast(startTextLen)
         state.onTextFieldValueChange(
-            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+            TextFieldValue(text = afterEcho, selection = TextRange(afterEcho.length))
         )
-        state.assertInvariants("after first resync")
-        assertEquals(3, state.richParagraphList.size, "First resync must not delete bullet")
-        assertIs<UnorderedList>(state.richParagraphList[2].type, "First resync must not demote type")
-
-        // Second resync: Samsung-style IME sends the same removal again
-        state.onTextFieldValueChange(
-            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
-        )
-        state.assertInvariants("after second resync")
-        assertEquals(3, state.richParagraphList.size, "Second resync must not delete bullet")
-        assertIs<UnorderedList>(state.richParagraphList[2].type, "Second resync must not demote type")
+        state.assertInvariants("after single echo")
+        assertEquals(3, state.richParagraphList.size, "Echo must not delete the bullet paragraph")
+        assertIs<UnorderedList>(state.richParagraphList[2].type, "Echo must not demote paragraph type")
     }
 
     @Test
-    fun testDoubleResyncAfterEnter_orderedList() {
+    fun testDoubleStartTextEchoAfterEnter_unorderedList() {
         val state = RichTextState()
-        state.setHtml("<ol><li>brot</li></ol>")
-
+        state.setHtml("<ul><li>item1</li><li>item2</li></ul>")
         val textBeforeEnter = state.annotatedString.text
         state.selection = TextRange(textBeforeEnter.length)
 
-        // Enter
         state.onTextFieldValueChange(
             TextFieldValue(
                 text = textBeforeEnter + "\n",
                 selection = TextRange(textBeforeEnter.length + 1),
             )
         )
-        assertEquals(2, state.richParagraphList.size)
-        assertIs<OrderedList>(state.richParagraphList[1].type)
+        assertEquals(3, state.richParagraphList.size)
+        assertIs<UnorderedList>(state.richParagraphList[2].type)
 
-        val textAfterEnter = state.annotatedString.text // "1. brot 2. "
+        val textAfterEnter = state.annotatedString.text
+        val startTextLen = state.richParagraphList[2].type.startText.length
+        val afterEcho = textAfterEnter.dropLast(startTextLen)
 
-        // First prefix-removal resync (no \n — pure removal path)
-        val firstResync = textAfterEnter.dropLast(
-            state.richParagraphList[1].type.startText.length
-        )
+        // First echo
         state.onTextFieldValueChange(
-            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+            TextFieldValue(text = afterEcho, selection = TextRange(afterEcho.length))
         )
-        state.assertInvariants("after first no-newline resync")
-        assertEquals(2, state.richParagraphList.size, "First resync must not delete paragraph")
-        assertIs<OrderedList>(state.richParagraphList[1].type)
+        state.assertInvariants("after first echo")
+        assertEquals(3, state.richParagraphList.size, "First echo must not delete bullet")
+        assertIs<UnorderedList>(state.richParagraphList[2].type, "First echo must not demote type")
 
-        // Second prefix-removal resync
+        // Second echo (Samsung-style persistent re-send)
         state.onTextFieldValueChange(
-            TextFieldValue(text = firstResync, selection = TextRange(firstResync.length))
+            TextFieldValue(text = afterEcho, selection = TextRange(afterEcho.length))
         )
-        state.assertInvariants("after second no-newline resync")
-        assertEquals(2, state.richParagraphList.size, "Second resync must not delete paragraph")
-        assertIs<OrderedList>(state.richParagraphList[1].type, "Second resync must not demote to DefaultParagraph")
+        state.assertInvariants("after second echo")
+        assertEquals(3, state.richParagraphList.size, "Second echo must not delete bullet")
+        assertIs<UnorderedList>(state.richParagraphList[2].type, "Second echo must not demote type")
+    }
+
+    @Test
+    fun testDoubleStartTextEchoAfterEnter_orderedList() {
+        val state = RichTextState()
+        state.setHtml("<ol><li>item1</li><li>item2</li></ol>")
+        val textBeforeEnter = state.annotatedString.text
+        state.selection = TextRange(textBeforeEnter.length)
+
+        state.onTextFieldValueChange(
+            TextFieldValue(
+                text = textBeforeEnter + "\n",
+                selection = TextRange(textBeforeEnter.length + 1),
+            )
+        )
+        assertEquals(3, state.richParagraphList.size)
+        assertIs<OrderedList>(state.richParagraphList[2].type)
+
+        val textAfterEnter = state.annotatedString.text
+        val startTextLen = state.richParagraphList[2].type.startText.length
+        val afterEcho = textAfterEnter.dropLast(startTextLen)
+
+        // First echo
+        state.onTextFieldValueChange(
+            TextFieldValue(text = afterEcho, selection = TextRange(afterEcho.length))
+        )
+        state.assertInvariants("after first echo")
+        assertEquals(3, state.richParagraphList.size, "First echo must not delete bullet")
+        assertIs<OrderedList>(state.richParagraphList[2].type, "First echo must not demote type")
+
+        // Second echo
+        state.onTextFieldValueChange(
+            TextFieldValue(text = afterEcho, selection = TextRange(afterEcho.length))
+        )
+        state.assertInvariants("after second echo")
+        assertEquals(3, state.richParagraphList.size, "Second echo must not delete bullet")
+        assertIs<OrderedList>(state.richParagraphList[2].type, "Second echo must not demote type")
+    }
+
+    @Test
+    fun testUserDeletingSelectedPrefixAfterEnter_exitsList() {
+        // The user counterpart of the echo: press Enter, select the fresh "\u2022 "
+        // prefix, delete it. Same removal shape as the echo but with a range
+        // selection; it must demote the item, not be silently restored.
+        val state = RichTextState()
+        state.setHtml("<ul><li>item1</li><li>item2</li></ul>")
+        val textBeforeEnter = state.annotatedString.text
+        state.selection = TextRange(textBeforeEnter.length)
+
+        state.onTextFieldValueChange(
+            TextFieldValue(
+                text = textBeforeEnter + "\n",
+                selection = TextRange(textBeforeEnter.length + 1),
+            )
+        )
+        assertEquals(3, state.richParagraphList.size)
+        assertIs<UnorderedList>(state.richParagraphList[2].type)
+
+        val textAfterEnter = state.annotatedString.text
+        val startTextLen = state.richParagraphList[2].type.startText.length
+
+        // Select the freshly inserted prefix, then delete it
+        state.selection = TextRange(textAfterEnter.length - startTextLen, textAfterEnter.length)
+        val afterDelete = textAfterEnter.dropLast(startTextLen)
+        state.onTextFieldValueChange(
+            TextFieldValue(text = afterDelete, selection = TextRange(afterDelete.length))
+        )
+        state.assertInvariants("after user deletes selected prefix")
+        assertIs<DefaultParagraph>(
+            state.richParagraphList[2].type,
+            "Deleting the selected prefix must exit the list, not be absorbed as an echo",
+        )
     }
 }
