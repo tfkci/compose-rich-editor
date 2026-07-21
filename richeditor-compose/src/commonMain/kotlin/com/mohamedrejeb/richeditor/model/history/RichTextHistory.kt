@@ -60,8 +60,16 @@ public class RichTextHistory internal constructor(
 
     public fun undo(): Boolean {
         val group = undoStack.removeLastOrNull() ?: return false
-        host.restoreState(group.before)
-        redoStack.addLast(group)
+        // Materialize the redo target lazily: the live state IS this group's
+        // `after` — any mutation since the group's last commit would have pushed
+        // a newer group above it on the stack, so nothing can be stale here.
+        // Capturing at undo time (instead of after every commit) avoids a full
+        // document deep copy per keystroke.
+        val resolved =
+            if (group.after == null) group.copy(after = host.captureState(clock()))
+            else group
+        host.restoreState(resolved.before)
+        redoStack.addLast(resolved)
         coalescer.reset()
         refreshDerivedState()
         return true
@@ -69,7 +77,9 @@ public class RichTextHistory internal constructor(
 
     public fun redo(): Boolean {
         val group = redoStack.removeLastOrNull() ?: return false
-        host.restoreState(group.after)
+        // `after` is always materialized by undo() before a group reaches the
+        // redo stack; the fallback is defensive.
+        host.restoreState(group.after ?: group.before)
         undoStack.addLast(group)
         coalescer.reset()
         refreshDerivedState()
@@ -97,39 +107,37 @@ public class RichTextHistory internal constructor(
         coalescer.noteSelectionJump()
     }
 
-    /** Capture a snapshot via the host without mutating the stacks. */
-    internal fun captureForCommit(timestampMs: Long): RichTextSnapshot =
-        host.captureState(timestampMs)
-
     /**
-     * Called BEFORE a mutation is applied. [beforeSnapshot] must reflect the state
-     * prior to the mutation. The controller decides, based on [trigger] and the
-     * coalescer's state, whether to open a new group or extend the pending one.
+     * Called BEFORE a mutation is applied, while the host still reflects the
+     * pre-mutation state. The controller decides, based on [trigger] and the
+     * coalescer's state, whether this commit opens a new group — and only then
+     * captures the `before` snapshot. Commits that coalesce into the pending
+     * group capture nothing, so a typing burst costs one deep copy, not one
+     * per keystroke.
      */
-    internal fun onCommit(trigger: CommitTrigger, beforeSnapshot: RichTextSnapshot) {
+    internal fun onBeforeCommit(trigger: CommitTrigger, timestampMs: Long) {
         if (trigger == CommitTrigger.SelectionJump) {
             coalescer.noteSelectionJump()
             return
         }
         redoStack.clear()
-        val now = clock()
-        if (coalescer.shouldStartNewGroup(trigger, now)) {
-            undoStack.addLast(UndoGroup(before = beforeSnapshot, after = beforeSnapshot))
+        if (coalescer.shouldStartNewGroup(trigger, timestampMs)) {
+            undoStack.addLast(
+                UndoGroup(before = host.captureState(timestampMs), after = null)
+            )
             trimUndoStackToLimit()
         }
+        refreshDerivedState()
     }
 
     /**
-     * Called AFTER a mutation has been applied. Updates the tail group's `after`
-     * snapshot so redo rolls forward to the latest state.
+     * Called AFTER a mutation has been applied. The tail group's `after` snapshot
+     * is NOT captured here — undo() materializes it lazily — so this only advances
+     * the coalescer.
      */
     internal fun onAfterCommit(trigger: CommitTrigger) {
         if (trigger == CommitTrigger.SelectionJump || trigger == CommitTrigger.Programmatic) return
-        val now = clock()
-        val tail = undoStack.lastOrNull() ?: return
-        val after = host.captureState(now)
-        undoStack[undoStack.lastIndex] = tail.copy(after = after)
-        coalescer.noteCommit(trigger, now)
+        coalescer.noteCommit(trigger, clock())
         refreshDerivedState()
     }
 
@@ -144,7 +152,8 @@ public class RichTextHistory internal constructor(
 
     private data class UndoGroup(
         val before: RichTextSnapshot,
-        val after: RichTextSnapshot,
+        /** Redo target; `null` until materialized by the first undo of this group. */
+        val after: RichTextSnapshot?,
     )
 
     internal companion object {

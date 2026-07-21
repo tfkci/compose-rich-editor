@@ -2062,12 +2062,12 @@ public class RichTextState internal constructor(
             isPaste -> CommitTrigger.Paste
             else -> classifyTextChange(newTextFieldValue)
         }
-        val before = if (trigger != null) beginHistoryRecord() else null
+        val began = if (trigger != null) beginHistoryRecord(trigger) else false
 
         try {
             onTextFieldValueChangeInner(newTextFieldValue, isPaste, pendingHtml)
         } finally {
-            if (trigger != null) finishHistoryRecord(trigger, before)
+            if (trigger != null) finishHistoryRecord(trigger, began)
         }
     }
 
@@ -2453,24 +2453,26 @@ public class RichTextState internal constructor(
     }
 
     /**
-     * Captures the pre-mutation snapshot if the caller is an outer public-API entry.
-     * Returns `null` if recording is suppressed or we are already inside a recording
-     * call (nested mutation, should be attributed to the outer commit).
+     * Opens a history commit if the caller is an outer public-API entry. The history
+     * controller captures the pre-mutation snapshot itself, and only when the commit
+     * opens a new undo group. Returns `false` if recording is suppressed or we are
+     * already inside a recording call (nested mutation, should be attributed to the
+     * outer commit).
      */
-    private fun beginHistoryRecord(): RichTextSnapshot? {
-        if (suppressHistoryRecording || historyRecordingDepth > 0) return null
+    private fun beginHistoryRecord(trigger: CommitTrigger): Boolean {
+        if (suppressHistoryRecording || historyRecordingDepth > 0) return false
         historyRecordingDepth++
-        return history.captureForCommit(timestampMs = currentMonotonicMs())
+        history.onBeforeCommit(trigger, timestampMs = currentMonotonicMs())
+        return true
     }
 
     /**
-     * Completes a recording started by [beginHistoryRecord]. If [before] is `null`
+     * Completes a recording started by [beginHistoryRecord]. If [began] is `false`
      * the call was nested / suppressed and nothing is committed.
      */
-    private fun finishHistoryRecord(trigger: CommitTrigger, before: RichTextSnapshot?) {
-        if (before == null) return
+    private fun finishHistoryRecord(trigger: CommitTrigger, began: Boolean) {
+        if (!began) return
         historyRecordingDepth--
-        history.onCommit(trigger, before)
         history.onAfterCommit(trigger)
     }
 
@@ -2484,12 +2486,12 @@ public class RichTextState internal constructor(
         // recording it would produce a phantom undo step that confuses users. We
         // still seal the pending coalesced typing group so the toggle acts as a
         // natural break between typing bursts, matching how most editors behave.
-        val before = if (enabled) beginHistoryRecord() else null
+        val began = if (enabled) beginHistoryRecord(trigger) else false
         return try {
             block()
         } finally {
-            if (before != null) {
-                finishHistoryRecord(trigger, before)
+            if (began) {
+                finishHistoryRecord(trigger, began)
             } else if (enabled.not() && !suppressHistoryRecording && historyRecordingDepth == 0) {
                 history.sealPendingGroup()
             }
